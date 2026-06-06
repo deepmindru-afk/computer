@@ -66,7 +66,7 @@ export const sendMessage = (
 	parentId?: string | null,
 	params: { tool_approval_mode?: string } = {},
 	regenerationPrompt?: string,
-	files?: string[]
+	files?: { id: string; name: string; url: string; type: string }[]
 ) =>
 	fetchJSON<SendMessageResult>(
 		'/api/chats',

@@ -11,11 +11,13 @@
 	import { createFileMention, extractMentionedFiles, type FileMentionAttrs } from './FileMention';
 	import FileSuggestionPopup from './FileSuggestionPopup.svelte';
 	import { searchFiles } from '$lib/apis/files';
+	import { uploadFile } from '$lib/apis/files';
 	import ModelSelector from './ModelSelector.svelte';
 	import SendButton from './SendButton.svelte';
 	import PlusMenu from './PlusMenu.svelte';
 	import DictateButton from './DictateButton.svelte';
 	import QueuedMessageItem from './QueuedMessageItem.svelte';
+	import Icon from '../Icon.svelte';
 
 	interface Props {
 		inputText: string;
@@ -56,6 +58,63 @@
 		if (!lowlight.registered(lang)) return lowlight.highlightAuto(value);
 		return _origHighlight(lang, value, opts);
 	};
+
+	// ── File Uploads ────────────────────────────────
+	let attachedUploads = $state<{ id: string; name: string; url: string; type: string; loading?: boolean }[]>([]);
+	let isDragging = $state(false);
+
+	async function processFiles(files: File[]) {
+		for (const file of files) {
+			const id = Math.random().toString(36).substring(7);
+			const isImage = file.type.startsWith('image/');
+			const type = isImage ? 'image' : 'file';
+			attachedUploads = [...attachedUploads, { id, name: file.name, url: '', type, loading: true }];
+			
+			try {
+				const form = new FormData();
+				form.append('file', file);
+				const res = await uploadFile(form);
+				if (res && res.id) {
+					attachedUploads = attachedUploads.map(u => 
+						u.id === id ? { ...u, id: res.id, url: res.url, loading: false } : u
+					);
+				} else {
+					attachedUploads = attachedUploads.filter(u => u.id !== id);
+				}
+			} catch (err) {
+				console.error("Upload failed", err);
+				attachedUploads = attachedUploads.filter(u => u.id !== id);
+			}
+		}
+	}
+
+	function handleDrop(e: DragEvent) {
+		e.preventDefault();
+		isDragging = false;
+		if (e.dataTransfer?.files) {
+			processFiles(Array.from(e.dataTransfer.files));
+		}
+	}
+
+	function handlePaste(e: ClipboardEvent) {
+		if (e.clipboardData?.items) {
+			const files: File[] = [];
+			for (const item of Array.from(e.clipboardData.items)) {
+				if (item.kind === 'file') {
+					const file = item.getAsFile();
+					if (file) files.push(file);
+				}
+			}
+			if (files.length > 0) {
+				e.preventDefault(); // Stop TipTap from inserting base64 strings
+				processFiles(files);
+			}
+		}
+	}
+
+	function removeUpload(id: string) {
+		attachedUploads = attachedUploads.filter(u => u.id !== id);
+	}
 
 	// ── @file mention suggestion ────────────────────
 	let popupEl: HTMLDivElement | null = null;
@@ -290,17 +349,26 @@
 		// TipTap auto-sizes; no-op kept for API compat
 	}
 
-	/** Get file paths from @mentions in the current editor content. */
-	export function getFiles(): string[] {
-		if (!editor) return [];
-		return extractMentionedFiles(editor.getJSON());
+	export function getFiles(): any[] {
+		return attachedUploads.filter(u => !u.loading);
+	}
+
+	export function clearUploads() {
+		attachedUploads = [];
 	}
 
 	// Allow sending during streaming (message will be enqueued server-side)
 	const canSend = $derived(inputText.trim() && selectedModel && !sending);
 </script>
 
-<div class="relative">
+<div 
+	class="relative {isDragging ? 'ring-2 ring-blue-500 rounded-3xl' : ''}"
+	ondrop={handleDrop}
+	onpaste={handlePaste}
+	ondragover={(e) => { e.preventDefault(); isDragging = true; }}
+	ondragleave={() => { isDragging = false; }}
+	role="presentation"
+>
 	<!-- Queued messages (above input, matching open-webui layout) -->
 	{#if queuedMessages.length > 0}
 		<div
@@ -321,6 +389,47 @@
 	<div
 		class="rounded-3xl shadow-lg border border-gray-100/40 dark:border-white/4 focus-within:border-gray-200/50 focus-within:dark:border-white/8 transition px-1 bg-white dark:bg-gray-500/5"
 	>
+		<!-- Uploaded Files Preview -->
+		{#if attachedUploads.length > 0}
+			<div class="mx-2 pt-2 flex flex-wrap gap-2">
+				{#each attachedUploads as upload}
+					<div class="relative group flex-shrink-0">
+						{#if upload.loading}
+							<div class="flex items-center justify-center size-8 bg-gray-50 dark:bg-white/5 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
+								<div class="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+							</div>
+						{:else if upload.type === 'image'}
+							<img src={upload.url} alt={upload.name} class="size-8 object-cover rounded-xl border border-gray-200 dark:border-white/10 shadow-sm" />
+						{:else}
+							<div class="relative group px-2 w-48 h-8 flex items-center gap-1.5 bg-white dark:bg-[#1a1a1a] border border-gray-100 dark:border-white/5 rounded-xl text-left flex-shrink-0 shadow-sm">
+								<div class="shrink-0">
+									<Icon name="page-text" size={14} class="text-gray-500 dark:text-gray-400" />
+								</div>
+								<div class="flex flex-col justify-center w-full overflow-hidden">
+									<div class="dark:text-gray-100 text-xs flex justify-between items-center w-full gap-2">
+										<div class="font-medium truncate flex-1">{upload.name}</div>
+										<div class="text-[10px] text-gray-500 capitalize shrink-0">{upload.type === 'file' ? 'File' : upload.type}</div>
+									</div>
+								</div>
+							</div>
+						{/if}
+						
+						<div class="absolute -top-1.5 -right-1.5 z-10">
+							<button 
+								class="bg-white text-black border border-white rounded-full group-hover:visible invisible transition outline-none shadow-sm flex items-center justify-center"
+								type="button"
+								onclick={() => removeUpload(upload.id)}
+								aria-label="Remove upload"
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5" aria-hidden="true">
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"/>
+								</svg>
+							</button>
+						</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
 		<!-- Editor area -->
 		<div class="px-2.5">
 			<div
@@ -340,7 +449,7 @@
 			<div class="ml-0.5 self-end flex items-center">
 				<PlusMenu
 					onfiles={(files) => {
-						/* TODO: handle file uploads */
+						if (files) processFiles(Array.from(files));
 					}}
 				/>
 			</div>

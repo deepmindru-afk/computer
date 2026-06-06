@@ -328,19 +328,20 @@ async def search_files(
     path: str = Query(..., description="Root path to search"),
     limit: int = Query(20, description="Max results"),
 ):
-    """Fuzzy filename search. Walks tree, matches basename case-insensitively.
+    """Fuzzy file search. Walks tree, matching basename and relative path case-insensitively.
 
-    Results are ranked: exact match > starts-with > contains.
-    Within each tier, shorter names rank higher (more specific match).
+    Results are ranked by where/how the query matches: exact name > name prefix >
+    exact path > path prefix > name contains > path contains. Within each tier,
+    shorter paths rank higher (more specific match).
     """
 
     root = Path(path).resolve()
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=404, detail=f"Path not found: {path}")
 
-    query_lower = query.lower()
+    query_lower = query.strip().lower().replace("\\", "/")
     # Collect all matches first, then rank
-    matches: list[tuple[int, int, SearchResult]] = []  # (score, name_len, result)
+    matches: list[tuple[int, int, SearchResult]] = []  # (score, path_len, result)
     max_collect = limit * 10  # collect more than needed for ranking
 
     def walk(directory: Path, depth: int = 0):

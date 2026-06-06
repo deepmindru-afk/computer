@@ -473,6 +473,7 @@
 			(_: string, id: string, label: string) => `[${label}](file://${id})`
 		);
 		inputText = '';
+		chatInputEl?.clearUploads();
 		autoScroll = true;
 		await tick();
 		chatInputEl?.resetHeight();
@@ -876,6 +877,7 @@
 						{#if msg.role === 'user'}
 							<UserMessage
 								content={msg.content}
+								meta={msg.meta}
 								{siblingIndex}
 								siblingTotal={siblingIds.length}
 								onnavigate={(dir) => handleNavigate(msg.id, dir)}

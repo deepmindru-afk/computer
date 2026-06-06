@@ -148,7 +148,23 @@ def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
         role = m["role"]
         if role == "system":
             continue  # system goes in body.system
+        
         content = m.get("content", "")
+        if isinstance(content, list):
+            formatted_content = []
+            for block in content:
+                if block.get("type") == "text":
+                    formatted_content.append({"type": "text", "text": block.get("text", "")})
+                elif block.get("type") == "image":
+                    formatted_content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": block.get("media_type", "image/jpeg"),
+                            "data": block.get("base64", "")
+                        }
+                    })
+            content = formatted_content
         if role == "tool":
             # tool result → Anthropic tool_result block
             result.append(
@@ -283,7 +299,24 @@ def _to_openai_messages(messages: list[dict], instructions: str) -> list[dict]:
     for m in messages:
         if m["role"] == "system":
             continue
-        result.append(m)
+        
+        content = m.get("content", "")
+        if isinstance(content, list):
+            formatted_content = []
+            for block in content:
+                if block.get("type") == "text":
+                    formatted_content.append({"type": "text", "text": block.get("text", "")})
+                elif block.get("type") == "image":
+                    data_uri = f"data:{block.get('media_type', 'image/jpeg')};base64,{block.get('base64', '')}"
+                    formatted_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_uri}
+                    })
+            new_m = dict(m)
+            new_m["content"] = formatted_content
+            result.append(new_m)
+        else:
+            result.append(m)
     return result
 
 
@@ -407,7 +440,22 @@ def _to_responses_input(messages: list[dict], instructions: str) -> list[dict]:
                     }
                 )
         else:
-            items.append({"role": role, "content": m.get("content", "")})
+            content = m.get("content", "")
+            if isinstance(content, list):
+                formatted_content = []
+                for block in content:
+                    if block.get("type") == "text":
+                        formatted_content.append({"type": "input_text", "text": block.get("text", "")})
+                    elif block.get("type") == "image":
+                        # Not all models support input_image, but this is the Responses API spec
+                        data_uri = f"data:{block.get('media_type', 'image/jpeg')};base64,{block.get('base64', '')}"
+                        formatted_content.append({
+                            "type": "input_image",
+                            "image_url": data_uri
+                        })
+                items.append({"role": role, "content": formatted_content})
+            else:
+                items.append({"role": role, "content": content})
     return items
 
 

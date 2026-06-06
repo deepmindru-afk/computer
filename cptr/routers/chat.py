@@ -312,7 +312,7 @@ class SendMessageRequest(BaseModel):
     chat_id: Optional[str] = None
     parent_id: Optional[str] = None
     regeneration_prompt: Optional[str] = None
-    files: List[str] = []
+    files: List[dict] = []
     params: dict = {}
 
 

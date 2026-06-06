@@ -375,18 +375,58 @@ async def _load_message_history(chat_id: str, message_id: str) -> list[dict]:
             continue
         entry: dict = {"role": m.role, "content": m.content or ""}
 
-        # Inject @file mention contents into user messages
+        # Transform uploaded images into base64 multimodal blocks; inline text files
         if m.role == "user":
             attached_files = (m.meta or {}).get("files", [])
-            if attached_files:
-                file_parts = []
-                for fpath in attached_files:
-                    try:
-                        text = Path(fpath).read_text(errors="replace")[:50_000]
-                        file_parts.append(f"--- {fpath} ---\n{text}")
-                    except Exception:
-                        file_parts.append(f"--- {fpath} --- (unreadable)")
-                entry["content"] += "\n\n" + "\n\n".join(file_parts)
+            images = [
+                f for f in attached_files 
+                if isinstance(f, dict) and (f.get("type") == "image" or (f.get("content_type") or "").startswith("image/"))
+            ]
+            non_images = [
+                f for f in attached_files 
+                if isinstance(f, dict) and f not in images
+            ]
+            
+            if images or non_images:
+                from cptr.utils.storage import get_storage
+                import base64
+                
+                text_content = entry["content"]
+                
+                # Append file:// references so the AI can read them with view_file
+                if non_images:
+                    from cptr.utils.storage import UPLOADS_DIR
+                    file_refs = []
+                    for f in non_images:
+                        file_id = f.get("id")
+                        if not file_id:
+                            continue
+                        name = f.get("name", "file")
+                        file_path = UPLOADS_DIR / file_id
+                        file_refs.append(f"[{name}](file://{file_path})")
+                    if file_refs:
+                        text_content += "\n\nAttached files:\n" + "\n".join(file_refs)
+
+                content_blocks = [{"type": "text", "text": text_content}] if text_content else []
+                
+                for img in images:
+                    file_id = img.get("id")
+                    if not file_id:
+                        continue
+                    data = await get_storage().get(file_id)
+                    if data:
+                        b64_str = base64.b64encode(data).decode("utf-8")
+                        ctype = img.get("content_type") or "image/png"
+                        content_blocks.append({
+                            "type": "image",
+                            "media_type": ctype,
+                            "base64": b64_str
+                        })
+                
+                if len(content_blocks) > (1 if text_content else 0):
+                    entry["content"] = content_blocks
+                elif text_content != entry["content"]:
+                    entry["content"] = text_content
 
         # Reconstruct tool calls from output items for the provider
         if m.output:
