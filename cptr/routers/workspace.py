@@ -482,7 +482,11 @@ async def serve_static(file_path: str):
     HTML files in iframes can resolve relative CSS/JS/image references.
     E.g. /api/files/serve/home/user/project/index.html
     """
-    target = Path("/" + file_path).resolve()
+    # Windows paths arrive as "C:/Users/..." - don't prepend /
+    if len(file_path) >= 2 and file_path[1] == ':':
+        target = Path(file_path).resolve()
+    else:
+        target = Path("/" + file_path).resolve()
 
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {file_path}")

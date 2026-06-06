@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from typing import Any
 
 
@@ -130,9 +131,10 @@ async def diff(
     """Get diff output as structured data."""
     if untracked and file:
         # Untracked files: use --no-index to diff against empty
+        null_device = "NUL" if sys.platform == "win32" else "/dev/null"
         _, out, _ = await _run(
             "diff", "--no-index", "--unified=3",
-            "--", "/dev/null", file,
+            "--", null_device, file,
             cwd=root, check=False,
         )
         return _parse_diff(out)

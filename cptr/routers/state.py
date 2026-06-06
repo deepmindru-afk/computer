@@ -161,6 +161,25 @@ async def get_welcome(request: Request):
                     mem[parts[0].rstrip(":")] = int(parts[1]) * 1024
                 system["memory_total"] = mem.get("MemTotal", 0)
                 system["memory_available"] = mem.get("MemAvailable", 0)
+        elif platform.system() == "Windows":
+            import ctypes
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            mem_info = MEMORYSTATUSEX()
+            mem_info.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(mem_info))
+            system["memory_total"] = mem_info.ullTotalPhys
+            system["memory_available"] = mem_info.ullAvailPhys
     except Exception:
         pass
 
@@ -187,6 +206,10 @@ async def get_welcome(request: Request):
         elif platform.system() == "Linux":
             with open("/proc/uptime") as f:
                 system["uptime_seconds"] = int(float(f.read().split()[0]))
+        elif platform.system() == "Windows":
+            import ctypes
+            ms = ctypes.windll.kernel32.GetTickCount64()
+            system["uptime_seconds"] = ms // 1000
     except Exception:
         pass
 
@@ -213,6 +236,15 @@ async def get_welcome(request: Request):
             cpus = system.get("cpu_count", 1)
             if load and cpus:
                 system["cpu_usage"] = round(min(load[0] / cpus * 100, 100), 1)
+        elif platform.system() == "Windows":
+            result = subprocess.run(
+                ["wmic", "cpu", "get", "loadpercentage", "/value"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.splitlines():
+                if line.startswith("LoadPercentage="):
+                    system["cpu_usage"] = float(line.split("=", 1)[1])
+                    break
     except Exception:
         pass
 
@@ -240,6 +272,19 @@ async def get_welcome(request: Request):
                 parts = line.split()
                 if len(parts) >= 4 and "127.0.0.1" not in parts[3]:
                     interfaces.append({"name": parts[1], "ip": parts[3].split("/")[0]})
+        elif platform.system() == "Windows":
+            result = subprocess.run(
+                ["ipconfig"], capture_output=True, text=True, timeout=3,
+            )
+            current_iface = ""
+            for line in result.stdout.splitlines():
+                stripped = line.strip()
+                if line and not line.startswith(" ") and ":" in line:
+                    current_iface = line.split(":")[0].strip()
+                elif "IPv4" in stripped and ":" in stripped:
+                    ip = stripped.rsplit(":", 1)[1].strip()
+                    if ip != "127.0.0.1":
+                        interfaces.append({"name": current_iface, "ip": ip})
         if interfaces:
             system["network"] = interfaces
     except Exception:
@@ -277,10 +322,42 @@ async def get_welcome(request: Request):
                         "mem": float(parts[2]),
                         "name": parts[3],
                     })
+        elif platform.system() == "Windows":
+            result = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=5,
+            )
+            import csv
+            from io import StringIO
+            reader = csv.reader(StringIO(result.stdout))
+            mem_total = system.get("memory_total", 1)
+            entries = []
+            for row in reader:
+                if len(row) >= 5:
+                    try:
+                        pid = int(row[1])
+                        # Memory is in "N,NNN K" format
+                        mem_str = row[4].replace(",", "").replace(" K", "").strip()
+                        mem_kb = int(mem_str) if mem_str.isdigit() else 0
+                        entries.append({
+                            "pid": pid,
+                            "cpu": 0,  # tasklist doesn't provide CPU%
+                            "mem": round(mem_kb * 1024 / mem_total * 100, 1) if mem_total else 0,
+                            "name": row[0],
+                            "_mem_kb": mem_kb,
+                        })
+                    except (ValueError, IndexError):
+                        pass
+            # Sort by memory usage (best we can do without psutil)
+            entries.sort(key=lambda e: e.get("_mem_kb", 0), reverse=True)
+            for e in entries[:5]:
+                e.pop("_mem_kb", None)
+                processes.append(e)
     except Exception:
         pass
 
     # Suggested directories
+    import tempfile
     home = str(Path.home())
     candidates = [
         home,
@@ -294,8 +371,13 @@ async def get_welcome(request: Request):
         str(Path.home() / "dev"),
         str(Path.home() / "workspace"),
         str(Path.home() / "src"),
-        "/tmp",
     ]
+    if platform.system() == "Windows":
+        candidates.extend([
+            str(Path.home() / "source" / "repos"),
+            str(Path.home() / "OneDrive" / "Documents"),
+        ])
+    candidates.append(tempfile.gettempdir())
     suggestions = []
     seen = set()
     for c in candidates:

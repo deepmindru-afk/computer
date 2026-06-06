@@ -227,7 +227,7 @@ async def _search_rg(
         raise FileNotFoundError(err) if "not found" in err.lower() else Exception(err)
 
     # Make paths relative
-    prefix = str(full) + "/"
+    prefix = str(full) + os.sep
     lines = output.splitlines()[:50]
     result = [line.replace(prefix, "") for line in lines]
     return "\n".join(result) if result else "No matches found."

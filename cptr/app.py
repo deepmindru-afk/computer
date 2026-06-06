@@ -63,6 +63,56 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+# Path normalization middleware (Windows: \ → / in JSON responses)
+import platform
+if platform.system() == "Windows":
+    import json as _json
+
+    @app.middleware("http")
+    async def normalize_paths_middleware(request: Request, call_next):
+        response = await call_next(request)
+        if (
+            response.headers.get("content-type", "").startswith("application/json")
+            and hasattr(response, "body")
+        ):
+            try:
+                body = b""
+                async for chunk in response.body_iterator:
+                    body += chunk if isinstance(chunk, bytes) else chunk.encode()
+                text = body.decode("utf-8")
+                # Replace backslashes that appear in JSON string values
+                # (JSON already escapes \ as \\, so we replace \\\\ with /)
+                data = _json.loads(text)
+                _normalize_obj(data)
+                new_body = _json.dumps(data, ensure_ascii=False).encode("utf-8")
+                from starlette.responses import Response as StarletteResponse
+                return StarletteResponse(
+                    content=new_body,
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type="application/json",
+                )
+            except Exception:
+                pass
+        return response
+
+    def _normalize_obj(obj):
+        """Recursively replace backslashes with forward slashes in string values
+        that look like file paths (contain :\\)."""
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if isinstance(v, str) and "\\" in v:
+                    obj[k] = v.replace("\\", "/")
+                elif isinstance(v, (dict, list)):
+                    _normalize_obj(v)
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                if isinstance(v, str) and "\\" in v:
+                    obj[i] = v.replace("\\", "/")
+                elif isinstance(v, (dict, list)):
+                    _normalize_obj(v)
+
+
 @app.get("/api/config")
 async def get_config():
     """Public config for the frontend."""

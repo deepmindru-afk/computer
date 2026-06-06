@@ -98,6 +98,9 @@ async def _fs_watcher_loop(ws: WebSocket, initial_path: str, path_holder: dict) 
 
             paths = handler.drain()
             if paths:
+                # Normalize to forward slashes so the frontend can compare with /
+                if sys.platform == "win32":
+                    paths = [p.replace("\\", "/") for p in paths]
                 try:
                     await ws.send_json({"type": "fs_change", "paths": paths})
                 except Exception:
@@ -125,7 +128,16 @@ _SYSTEM_PORTS = {22, 53, 80, 443, 631, 5353}
 def _get_ppid(pid: int) -> int:
     """Get parent PID. Cross-platform."""
     try:
-        if sys.platform == "linux":
+        if sys.platform == "win32":
+            r = subprocess.run(
+                ["wmic", "process", "where", f"ProcessId={pid}", "get", "ParentProcessId", "/value"],
+                capture_output=True, text=True, timeout=3,
+            )
+            for line in r.stdout.splitlines():
+                if line.startswith("ParentProcessId="):
+                    return int(line.split("=", 1)[1])
+            return 0
+        elif sys.platform == "linux":
             with open(f"/proc/{pid}/stat") as f:
                 return int(f.read().split()[3])
         else:
@@ -145,8 +157,16 @@ def _find_session_for_pid(pid: int) -> Optional[str]:
     while current > 1 and current not in visited:
         visited.add(current)
         for session in manager._sessions.values():
+            # Unix: match by child PID
             if session._pid == current:
                 return session.session_id
+            # Windows: winpty process has a .pid attribute
+            if session._process is not None:
+                try:
+                    if getattr(session._process, "pid", None) == current:
+                        return session.session_id
+                except Exception:
+                    pass
         current = _get_ppid(current)
     return None
 
@@ -154,7 +174,17 @@ def _find_session_for_pid(pid: int) -> Optional[str]:
 def _get_process_name(pid: int) -> str:
     """Get process name from PID."""
     try:
-        if sys.platform == "linux":
+        if sys.platform == "win32":
+            r = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=3,
+            )
+            # Output: "name.exe","1234",...
+            line = r.stdout.strip()
+            if line and line.startswith('"'):
+                return line.split('"')[1]
+            return "unknown"
+        elif sys.platform == "linux":
             with open(f"/proc/{pid}/comm") as f:
                 return f.read().strip()
         else:
@@ -249,6 +279,36 @@ def _inode_to_pid(inode: int) -> Optional[int]:
     return None
 
 
+def _scan_ports_windows() -> list[dict]:
+    """Scan listening ports on Windows using netstat."""
+    try:
+        r = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            capture_output=True, text=True, timeout=5,
+        )
+        ports = []
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and "LISTENING" in parts:
+                local = parts[1]
+                if ":" in local:
+                    port_str = local.rsplit(":", 1)[1]
+                    try:
+                        port = int(port_str)
+                        pid = int(parts[-1])
+                        ports.append({
+                            "port": port,
+                            "pid": pid,
+                            "process": _get_process_name(pid),
+                        })
+                    except ValueError:
+                        pass
+        return ports
+    except Exception as e:
+        logger.warning(f"Port scan failed: {e}")
+        return []
+
+
 def _scan_ports() -> list[dict]:
     """Scan listening ports. Cross-platform."""
     system = platform.system()
@@ -256,8 +316,9 @@ def _scan_ports() -> list[dict]:
         raw = _scan_ports_darwin()
     elif system == "Linux":
         raw = _scan_ports_linux()
+    elif system == "Windows":
+        raw = _scan_ports_windows()
     else:
-        # Windows fallback, not implemented yet
         return []
 
     # Get our own PID to filter ourselves out
