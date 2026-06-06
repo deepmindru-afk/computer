@@ -256,6 +256,7 @@
 		</div>
 	{:else}
 		<!-- Normal display -->
+		<div>
 		{#if !done && (!output || output.length === 0)}
 			<MarkdownRenderer {content} /><span class="inline-block w-[2px] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"></span>
 		{:else}
@@ -272,7 +273,7 @@
 					{@const isGroupOpen = expandedGroups.has(groupIdx)}
 					{@const hasPendingApproval = calls.some((c: any) => c.status === 'pending')}
 
-					<div class="w-full my-0.5">
+					<div class="w-full">
 						<!-- Group header -->
 						<button
 							class="w-fit text-left text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition cursor-pointer"
@@ -523,6 +524,7 @@
 				<span class="inline-block w-[2px] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"></span>
 			{/if}
 		{/if}
+		</div>
 
 		<!-- Controls toolbar -->
 		{#if done || siblingTotal > 1}
