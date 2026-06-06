@@ -197,9 +197,9 @@
 	}
 
 	function handlePathKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') { e.preventDefault(); confirmPath(); }
-		else if (e.key === 'Escape') { e.preventDefault(); cancelEditing(); }
-		else if (e.key === 'Tab') { e.preventDefault(); tabComplete(); }
+		if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); confirmPath(); }
+		else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEditing(); }
+		else if (e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); tabComplete(); }
 	}
 
 	function handleKeydown(e: KeyboardEvent) {

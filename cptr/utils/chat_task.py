@@ -353,6 +353,27 @@ async def run_chat_task(
                         await emit(output=result_item)
                         _sync_state()
 
+                        # Artifact: write to artifacts dir and emit card
+                        args = event["arguments"]
+                        artifact_type = args.get("artifact_type", "")
+                        if artifact_type:
+                            from datetime import datetime, timezone
+                            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                            artifact_dir = Path(workspace) / ".cptr" / "artifacts" / chat_id
+                            artifact_dir.mkdir(parents=True, exist_ok=True)
+                            artifact_path = artifact_dir / f"{ts}_{artifact_type}.md"
+                            artifact_path.write_text(args.get("content", ""))
+                            artifact_item = {
+                                "type": "artifact",
+                                "artifact_type": artifact_type,
+                                "title": Path(args.get("path", artifact_type)).stem.replace("_", " ").title(),
+                                "content": args.get("content", ""),
+                                "path": str(artifact_path.relative_to(Path(workspace))),
+                            }
+                            output_items.append(artifact_item)
+                            await emit(output=artifact_item)
+                            _sync_state()
+
                         # Append to messages for next iteration
                         _append_tool_to_messages(messages, event, result, provider)
                         restart = True

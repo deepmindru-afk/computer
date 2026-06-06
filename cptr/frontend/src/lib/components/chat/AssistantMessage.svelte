@@ -154,7 +154,12 @@
 		item: any;
 	}
 
-	type DisplayItem = ToolGroup | MessageItem;
+	interface ArtifactItem {
+		type: 'artifact_item';
+		item: any;
+	}
+
+	type DisplayItem = ToolGroup | MessageItem | ArtifactItem;
 
 	const displayItems = $derived.by((): DisplayItem[] => {
 		if (!output?.length) return [];
@@ -186,6 +191,9 @@
 			} else if (item.type === 'message') {
 				flushGroup();
 				items.push({ type: 'message_item', item });
+			} else if (item.type === 'artifact') {
+				flushGroup();
+				items.push({ type: 'artifact_item', item });
 			}
 			// function_call_output items are handled via outputMap, skip standalone render
 		}
@@ -268,6 +276,20 @@
 			{#each displayItems as displayItem, groupIdx}
 				{#if displayItem.type === 'message_item'}
 					<MarkdownRenderer content={displayItem.item.content?.map((c: any) => c.text).join('') || ''} />
+
+				{:else if displayItem.type === 'artifact_item'}
+					{@const artifact = displayItem.item}
+					<div class="w-full my-2 rounded-xl border border-gray-200 dark:border-white/10">
+						<div class="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 dark:border-white/10">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4 text-gray-400 dark:text-gray-500 shrink-0">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+							</svg>
+							<span class="text-sm font-medium text-gray-700 dark:text-gray-200">{artifact.title || 'Artifact'}</span>
+						</div>
+						<div class="px-4 py-3 max-h-[32rem] overflow-y-auto">
+							<MarkdownRenderer content={artifact.content || ''} />
+						</div>
+					</div>
 
 				{:else if displayItem.type === 'tool_group'}
 					{@const calls = displayItem.calls}

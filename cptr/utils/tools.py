@@ -263,13 +263,18 @@ async def create_file(
     path: str,
     content: str,
     overwrite: bool = False,
+    artifact_type: str = "",
     *,
     workspace: str,
 ) -> str:
     """Create a new file. Errors if file already exists unless overwrite is true.
+    For non-trivial tasks (multi-file changes, ambiguous requirements, architectural decisions),
+    create an implementation plan first with artifact_type='implementation_plan'. Write the plan
+    as markdown, then wait for the user to review before making changes.
     :param path: Path relative to workspace root.
     :param content: File contents to write.
     :param overwrite: Set to true to overwrite an existing file.
+    :param artifact_type: Set to 'implementation_plan' to present a plan for user review before coding.
     """
     full = _resolve_path(path, workspace)
     if full.is_file() and not overwrite:
