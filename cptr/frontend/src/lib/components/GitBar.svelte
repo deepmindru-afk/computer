@@ -375,7 +375,22 @@
 				return '';
 		}
 	}
+
+	$effect(() => {
+		if (!expanded) return;
+		function onKeydown(e: KeyboardEvent) {
+			if (!gitStatus?.is_repo) return;
+			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p' && !e.shiftKey && !e.altKey) {
+				e.preventDefault();
+				doPush();
+			}
+		}
+		window.addEventListener('keydown', onKeydown);
+		return () => window.removeEventListener('keydown', onKeydown);
+	});
 </script>
+
+
 
 {#if gitStatus?.is_repo}
 	<div
