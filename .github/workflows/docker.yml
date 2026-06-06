@@ -2,12 +2,12 @@ name: Docker (GHCR)
 
 on:
   push:
-    branches: [main]
+    branches: [main, release]
   workflow_dispatch:
 
 concurrency:
   group: docker-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -63,9 +63,19 @@ jobs:
             echo "No version change detected"
           fi
 
-  build-and-push-dev:
+  build-dev:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -80,33 +90,124 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (dev tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=dev
-            type=sha,prefix=dev-
-
-      - name: Build and push dev image
+      - name: Build and push ${{ matrix.platform }} dev image by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=dev-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=dev-${{ matrix.arch }}
 
-  build-and-push-release:
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-dev-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-dev:
+    if: github.ref == 'refs/heads/main'
+    needs: build-dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-dev-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create dev multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          docker buildx imagetools create \
+            -t "${{ env.IMAGE }}:dev" \
+            -t "${{ env.IMAGE }}:dev-${SHORT_SHA}" \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+
+  build-release:
     needs: detect-version-change
+    if: github.ref == 'refs/heads/release' && needs.detect-version-change.outputs.version_changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.platform }} release image by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-release-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-release:
+    needs: [detect-version-change, build-release]
     if: github.ref == 'refs/heads/release' && needs.detect-version-change.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-release-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -118,23 +219,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (release tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ needs.detect-version-change.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.detect-version-change.outputs.version }}
-
-      - name: Build and push release image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create release multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          VERSION="${{ needs.detect-version-change.outputs.version }}"
+          MAJOR_MINOR="${VERSION%.*}"
+          docker buildx imagetools create \
+            -t "${{ env.IMAGE }}:latest" \
+            -t "${{ env.IMAGE }}:${VERSION}" \
+            -t "${{ env.IMAGE }}:${MAJOR_MINOR}" \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)

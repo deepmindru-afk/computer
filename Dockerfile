@@ -1,5 +1,5 @@
 # ── Stage 1: Build the SvelteKit frontend ──────────────────
-FROM node:22-slim AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:22-slim AS frontend-builder
 
 WORKDIR /build/frontend
 COPY cptr/frontend/package.json cptr/frontend/package-lock.json ./
@@ -9,7 +9,7 @@ RUN npm run build
 
 
 # ── Stage 2: Install Python dependencies & build wheel ─────
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS backend-builder
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS backend-builder
 
 WORKDIR /build
 COPY pyproject.toml uv.lock LICENSE README.md CHANGELOG.md ./
