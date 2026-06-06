@@ -182,15 +182,32 @@
 	async function loadChat(id: string) {
 		chatId = id;
 		// Only show loading spinner on initial load (no messages yet).
-		// On reloads (e.g. after cancel), keep the DOM intact to preserve scroll position.
+		// On reloads (e.g. after cancel/done), keep the DOM intact to preserve scroll position.
 		const isInitialLoad = allMessages.length === 0;
 		if (isInitialLoad) loading = true;
+
+		// Snapshot scroll position before replacing messages so we can restore it
+		const savedScroll = !isInitialLoad && messagesEl ? messagesEl.scrollTop : -1;
+
 		try {
 			const data = await getChat(id);
 			allMessages = data.messages;
 			currentMessageId = data.chat.current_message_id;
 		} finally {
 			if (isInitialLoad) loading = false;
+		}
+
+		// On reloads, restore scroll position after the DOM re-renders.
+		// Skip if autoScroll is active — the auto-scroll effect will keep us at the bottom.
+		if (savedScroll >= 0 && !autoScroll) {
+			await tick();
+			if (messagesEl) {
+				messagesEl.scrollTop = savedScroll;
+				// Also restore after rAF to beat any competing scroll operations
+				requestAnimationFrame(() => {
+					if (messagesEl) messagesEl.scrollTop = savedScroll;
+				});
+			}
 		}
 	}
 
@@ -514,6 +531,9 @@
 		const active = allMessages.find((m) => m.role === 'assistant' && !m.done);
 		if (!active || !chatId) return;
 
+		// Keep the current autoScroll state: if the user was at the bottom,
+		// they stay there; if they had scrolled up, loadChat preserves position.
+
 		// Optimistically mark as done so streaming indicator disappears immediately
 		if (active.output) {
 			for (const item of active.output) {
@@ -530,8 +550,8 @@
 		} catch (err) {
 			console.error('[chat] cancel error', err);
 		}
-		// Reload to get canonical state from DB
-		await loadChat(chatId);
+		// Don't call loadChat here — the socket 'done' event will trigger it,
+		// and loadChat itself preserves scroll position on reloads.
 	}
 
 	function handleApprove(messageId: string, callId: string, approved: boolean) {
