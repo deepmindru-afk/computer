@@ -799,8 +799,8 @@
 <div class="flex flex-col h-full bg-white dark:bg-black">
 	{#if isLanding}
 		<!-- Landing: input + recent chats -->
-		<div class="flex-1 overflow-y-auto flex items-center justify-center">
-			<div class="max-w-xl w-full mx-auto px-4 flex flex-col pb-[5vh]">
+		<div class="flex-1 overflow-y-auto flex flex-col">
+			<div class="max-w-xl w-full mx-auto px-4 flex flex-col my-auto py-6">
 				<!-- Greeting -->
 				<div class="mb-8 text-center">
 					<h1 class="text-lg font-normal text-gray-800 dark:text-gray-200 tracking-tight">
