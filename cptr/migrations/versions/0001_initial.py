@@ -1,13 +1,13 @@
 """Initial schema: users, auths, user_states, config, files, chat, chat_message.
 
-Revision ID: 001
+Revision ID: 0001
 Create Date: 2026-05-28
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "001"
+revision = "0001"
 down_revision = None
 branch_labels = None
 depends_on = None
