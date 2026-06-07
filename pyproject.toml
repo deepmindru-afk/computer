@@ -38,6 +38,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["cptr"]
 artifacts = ["cptr/frontend/build"]
+exclude = ["cptr/frontend"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "CHANGELOG.md" = "cptr/CHANGELOG.md"

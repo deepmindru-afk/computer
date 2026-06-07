@@ -10,9 +10,9 @@ build/
 .env
 
 # Frontend
-computr/frontend/node_modules/
-computr/frontend/build/
-computr/frontend/.svelte-kit/
+cptr/frontend/node_modules/
+cptr/frontend/build/
+cptr/frontend/.svelte-kit/
 
 # IDE
 .vscode/
