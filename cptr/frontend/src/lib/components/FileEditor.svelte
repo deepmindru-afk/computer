@@ -18,6 +18,7 @@
 	import HtmlPreview from './preview/HtmlPreview.svelte';
 	import SvgPreview from './preview/SvgPreview.svelte';
 	import OfficePreview from './preview/OfficePreview.svelte';
+	import Spinner from './common/Spinner.svelte';
 	import { EditorState } from '@codemirror/state';
 	import {
 		EditorView,
@@ -173,7 +174,7 @@
 		if (type === 'added')
 			return 'bg-green-100 border-l-[3px] border-l-green-500 dark:bg-green-500/15 dark:border-l-green-400';
 		if (type === 'removed')
-			return 'bg-red-100 border-l-[3px] border-l-red-400 dark:bg-red-500/15 dark:border-l-red-400';
+			return 'bg-red-100 diff-gutter-removed dark:bg-red-500/15';
 		return '';
 	}
 
@@ -733,7 +734,7 @@
 
 	<div class="editor-area">
 		{#if loading}
-			<div class="state"><div class="spinner"></div></div>
+			<div class="state"><Spinner size={20} /></div>
 		{:else if error}
 			<div class="state error">{error}</div>
 
@@ -799,7 +800,7 @@
 		{:else if diffMode}
 			<!-- Diff view -->
 			{#if diffLoading}
-				<div class="state"><div class="spinner"></div></div>
+				<div class="state"><Spinner size={20} /></div>
 			{:else if diffFiles.length === 0}
 				<div class="state">
 					<p class="state-title">No changes</p>
@@ -1035,20 +1036,7 @@
 		color: var(--color-gray-500);
 	}
 
-	.spinner {
-		width: 20px;
-		height: 20px;
-		border: 2px solid var(--color-gray-700);
-		border-top-color: var(--color-gray-400);
-		border-radius: 50%;
-		animation: spin 0.6s linear infinite;
-	}
 
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
 
 	/* ── Diff view ────────────────────────────────────────── */
 
@@ -1131,5 +1119,17 @@
 
 	:global(.dark) .diff-ctx .diff-prefix {
 		color: var(--color-gray-600);
+	}
+
+	.diff-gutter-removed {
+		border-left: 3px solid transparent;
+		border-image: repeating-linear-gradient(
+				-45deg,
+				#ef4444 0,
+				#ef4444 1px,
+				transparent 1px,
+				transparent 3px
+			)
+			3;
 	}
 </style>

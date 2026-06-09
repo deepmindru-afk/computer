@@ -19,6 +19,7 @@
 	import DropdownMenu from './DropdownMenu.svelte';
 	import { tooltip } from '$lib/tooltip';
 	import { t } from '$lib/i18n';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	type GitFile = { path: string; status: string; staged: boolean };
 	type DiffHunk = { header: string; lines: { type: string; content: string }[] };
@@ -527,9 +528,7 @@
 					{/each}
 				{:else}
 					<div class="flex items-center justify-center h-10">
-						<div
-							class="w-3.5 h-3.5 border border-gray-300 dark:border-gray-600 border-t-gray-600 dark:border-t-gray-300 rounded-full animate-spin"
-						></div>
+						<Spinner size={14} />
 					</div>
 				{/if}
 			</div>

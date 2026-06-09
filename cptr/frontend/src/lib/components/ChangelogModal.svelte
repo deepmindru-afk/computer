@@ -3,6 +3,7 @@
 	import Modal from './Modal.svelte';
 	import Icon from './Icon.svelte';
 	import { appVersion, lastSeenVersion, showChangelog } from '$lib/stores';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	type ChangelogEntry = { title: string; content: string; raw: string };
 	type VersionData = { date: string; [section: string]: string | ChangelogEntry[] };
@@ -147,9 +148,7 @@
 				</div>
 			{:else}
 				<div class="flex flex-col items-center justify-center py-16 gap-3">
-					<div
-						class="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400"
-					></div>
+					<Spinner size={16} />
 					<span class="text-[11px] text-gray-400 dark:text-gray-600">Loading release notes...</span>
 				</div>
 			{/if}

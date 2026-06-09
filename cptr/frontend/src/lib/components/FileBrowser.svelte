@@ -761,9 +761,7 @@
 
 		{#if loading && initialLoad}
 			<div class="flex items-center justify-center py-12">
-				<div
-					class="w-4 h-4 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-				></div>
+				<Spinner size={16} />
 			</div>
 		{:else if error}
 			<div class="flex flex-col items-center justify-center py-12 gap-2">

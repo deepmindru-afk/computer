@@ -5,6 +5,7 @@
 	import { ApiError } from '$lib/apis';
 	import { refreshChatState } from '$lib/stores/chat';
 	import { t } from '$lib/i18n';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	interface Props {
 		onclose: () => void;
@@ -171,9 +172,7 @@
 				class="text-[13px] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100 disabled:opacity-30 disabled:pointer-events-none"
 			>
 				{#if creating}
-					<div
-						class="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-					></div>
+					<Spinner size={14} />
 				{:else}
 					{$t('connections.add')} →
 				{/if}

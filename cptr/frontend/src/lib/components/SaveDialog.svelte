@@ -3,6 +3,7 @@
 	import { getWelcome } from '$lib/apis/state';
 	import { listDir } from '$lib/apis/files';
 	import { t } from '$lib/i18n';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	interface Props {
 		defaultName?: string;
@@ -175,9 +176,7 @@
 		<div bind:this={listEl} class="flex-1 overflow-y-auto p-1 min-h-0">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
-					<div
-						class="w-4 h-4 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-					></div>
+					<Spinner size={16} />
 				</div>
 			{:else if error}
 				<div class="flex flex-col items-center justify-center gap-2 py-8 text-center">

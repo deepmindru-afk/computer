@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchHandler } from '$lib/apis';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	interface Props {
 		src: string;
@@ -296,7 +297,7 @@
 
 <div class="office-view">
 	{#if loading}
-		<div class="state"><div class="spinner"></div></div>
+		<div class="state"><Spinner size={20} /></div>
 	{:else if error}
 		<div class="state error-msg">{error}</div>
 	{:else if isDocx}
@@ -350,20 +351,7 @@
 		color: #ef4444;
 	}
 
-	.spinner {
-		width: 20px;
-		height: 20px;
-		border: 2px solid var(--color-gray-700);
-		border-top-color: var(--color-gray-400);
-		border-radius: 50%;
-		animation: spin 0.6s linear infinite;
-	}
 
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
 
 	/* ── DOCX ────────────────────────────────────── */
 

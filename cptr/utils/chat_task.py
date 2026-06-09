@@ -81,6 +81,11 @@ def get_live_state(message_id: str) -> dict | None:
     return _task_state.get(message_id)
 
 
+def get_active_chat_ids() -> set[str]:
+    """Return the set of chat_ids that currently have a running task."""
+    return {cid for mid, cid in _task_chat.items() if mid in _tasks and not _tasks[mid].done()}
+
+
 # ── Queue processing ────────────────────────────────────────
 
 

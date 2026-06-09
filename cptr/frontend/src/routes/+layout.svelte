@@ -4,6 +4,7 @@
 
 	import { onMount } from 'svelte';
 	import Bar from '$lib/components/Bar.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import ShortcutBar from '$lib/components/ShortcutBar.svelte';
 	import GitBar from '$lib/components/GitBar.svelte';
@@ -233,9 +234,7 @@
 {#if authState === 'checking'}
 	<!-- Loading spinner while checking auth -->
 	<div class="flex items-center justify-center h-dvh bg-white dark:bg-black">
-		<div
-			class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-		></div>
+		<Spinner size={20} />
 	</div>
 {:else if authState === 'needs_setup' || authState === 'needs_login'}
 	<!-- Auth screen -->
@@ -279,9 +278,7 @@
 	<ChangelogModal />
 {:else}
 	<div class="flex items-center justify-center h-dvh bg-white dark:bg-black">
-		<div
-			class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-		></div>
+		<Spinner size={20} />
 	</div>
 {/if}
 

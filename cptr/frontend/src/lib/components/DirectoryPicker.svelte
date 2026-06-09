@@ -5,6 +5,7 @@
 	import { listDir } from '$lib/apis/files';
 	import Icon from './Icon.svelte';
 	import { t } from '$lib/i18n';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	interface Props {
 		onclose: () => void;
@@ -317,9 +318,7 @@
 						placeholder={$t('directory.typePath')}
 					/>
 					{#if pathValid === 'checking'}
-						<div
-							class="w-3 h-3 border-[1.5px] border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin shrink-0"
-						></div>
+						<Spinner size={12} />
 					{:else if pathValid === 'valid'}
 						<span class="text-green-500 shrink-0 flex"><Icon name="check" size={12} /></span>
 					{:else if pathValid === 'invalid'}
@@ -384,9 +383,7 @@
 		<div bind:this={listEl} class="flex-1 overflow-y-auto p-1 min-h-0">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
-					<div
-						class="w-4 h-4 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-					></div>
+					<Spinner size={16} />
 				</div>
 			{:else if error}
 				<div class="flex flex-col items-center justify-center gap-2 py-8 text-center">

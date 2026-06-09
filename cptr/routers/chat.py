@@ -99,6 +99,11 @@ async def list_chats(
     chats = await Chat.get_by_ids(chat_ids)
     chat_map = {c.id: c for c in chats}
 
+    # Detect which chats have a running task (in-memory check, no DB hit)
+    from cptr.utils.chat_task import get_active_chat_ids
+
+    active_ids = get_active_chat_ids()
+
     # Build response: only include chats owned by this user
     result = []
     for entry in chat_entries:
@@ -114,6 +119,7 @@ async def list_chats(
                     "current_message_id": chat.current_message_id,
                     "created_at": chat.created_at,
                     "updated_at": chat.updated_at,
+                    "is_active": chat.id in active_ids,
                 }
             )
 
@@ -347,7 +353,7 @@ async def send_message(body: SendMessageRequest, request: Request):
             meta={"workspace": body.workspace, "params": body.params},
             created_at=now_ms(),
         )
-        # Ensure .cptr/chats/ dir exists (export will write the full JSON)
+        # Ensure .cptr/chats/ dir exists
         chats_dir = Path(body.workspace) / ".cptr" / "chats"
         await asyncio.to_thread(lambda: chats_dir.mkdir(parents=True, exist_ok=True))
 
@@ -410,7 +416,12 @@ async def send_message(body: SendMessageRequest, request: Request):
     # Update chat pointer to new leaf
     await Chat.update_current_message(chat.id, assistant_msg.id, now_ms())
 
-    # Start background task (export_chat_to_file runs after task completes)
+    # Export JSON immediately so list_chats discovers it right away
+    from cptr.utils.chat_export import export_chat_to_file
+
+    await export_chat_to_file(chat.id)
+
+    # Start background task (export_chat_to_file also runs after task completes)
     from cptr.utils.chat_task import start_task
 
     start_task(

@@ -3,6 +3,7 @@
 	import { login, setup, signup } from '$lib/apis/auth';
 	import { ApiError } from '$lib/apis';
 	import { t } from '$lib/i18n';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	interface Props {
 		mode: 'password' | 'pam';
@@ -111,9 +112,7 @@
 					disabled:opacity-30 disabled:pointer-events-none mt-2"
 			>
 				{#if loading}
-					<div
-						class="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-					></div>
+					<Spinner size={14} />
 				{:else}
 					{isSetup
 						? $t('auth.createAccountBtn')

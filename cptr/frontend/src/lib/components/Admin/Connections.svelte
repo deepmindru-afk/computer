@@ -7,6 +7,7 @@
 	import { listConnections, updateConnection, type Connection } from '$lib/apis/admin';
 	import { refreshChatState } from '$lib/stores/chat';
 	import { t } from '$lib/i18n';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	let connections = $state<Connection[]>([]);
 	let loading = $state(true);
@@ -66,9 +67,7 @@
 
 {#if loading}
 	<div class="flex justify-center py-8">
-		<div
-			class="w-4 h-4 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-		></div>
+		<Spinner size={16} />
 	</div>
 {:else}
 	<div>

@@ -5,6 +5,7 @@
 
 	import { tooltip } from '$lib/tooltip';
 	import Icon from './Icon.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 
 	type DiffLine = { type: 'added' | 'removed' | 'context'; content: string };
@@ -259,9 +260,7 @@
 >
 	{#if loading && !gitStatus}
 		<div class="flex h-full items-center justify-center">
-			<div
-				class="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400"
-			></div>
+			<Spinner size={16} />
 		</div>
 	{:else if error && !gitStatus}
 		<div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">

@@ -9,6 +9,7 @@
 	import { ApiError } from '$lib/apis';
 	import { session, setSession } from '$lib/session';
 	import { t } from '$lib/i18n';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	let currentPassword = $state('');
 	let newPassword = $state('');
@@ -136,9 +137,7 @@
 			disabled={uploadingAvatar}
 		>
 			{#if uploadingAvatar}
-				<div
-					class="w-5 h-5 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-				></div>
+				<Spinner size={20} />
 			{:else}
 				<img src={avatarUrl || '/user.png'} alt="Avatar" class="w-full h-full object-cover" />
 				<div
@@ -219,9 +218,7 @@
 		disabled:opacity-30 disabled:pointer-events-none"
 	>
 		{#if updatingPassword}
-			<div
-				class="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-			></div>
+			<Spinner size={14} />
 		{:else}
 			{$t('account.updatePassword')}
 		{/if}

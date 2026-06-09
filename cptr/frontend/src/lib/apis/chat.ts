@@ -25,6 +25,7 @@ export interface ChatInfo {
 	current_message_id: string | null;
 	created_at: number;
 	updated_at: number;
+	is_active?: boolean;
 }
 
 export interface ChatDetail {

@@ -4,6 +4,7 @@
 	import { getAdminConfig, updateConfig as apiUpdateConfig } from '$lib/apis/admin';
 	import { t } from '$lib/i18n';
 	import ToggleSwitch from '$lib/components/ToggleSwitch.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	let config = $state<Record<string, any>>({});
 	let loading = $state(true);
@@ -54,9 +55,7 @@
 
 	{#if loading}
 		<div class="flex justify-center py-8">
-			<div
-				class="w-4 h-4 border-2 border-gray-300 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400 rounded-full animate-spin"
-			></div>
+			<Spinner size={16} />
 		</div>
 	{:else}
 		<!-- Auth settings -->

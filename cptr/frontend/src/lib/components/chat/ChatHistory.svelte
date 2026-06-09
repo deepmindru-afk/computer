@@ -2,6 +2,7 @@
 	import type { ChatInfo } from '$lib/apis/chat';
 	import DropdownMenu from '../DropdownMenu.svelte';
 	import Pagination from '../common/Pagination.svelte';
+	import Spinner from '../common/Spinner.svelte';
 
 	interface Props {
 		chats: ChatInfo[];
@@ -136,6 +137,9 @@
 					if (e.key === 'Enter') onopen(chat.id);
 				}}
 			>
+				{#if chat.is_active}
+					<Spinner size={10} borderWidth={1.5} class="opacity-50" />
+				{/if}
 				<span class="flex-1 text-xs text-gray-500 dark:text-gray-500 truncate">{chat.title}</span>
 				<span class="text-[10px] text-gray-300 dark:text-gray-700 shrink-0"
 					>{formatTime(chat.updated_at)}</span
@@ -175,3 +179,4 @@
 		onclose={closeMenu}
 	/>
 {/if}
+
