@@ -308,7 +308,8 @@
 			</button>
 		</div>
 
-		<!-- Automations -->
+		<!-- Automations (only when chat/LLM backend is available) -->
+		{#if $chatEnabled}
 		<div class="px-1.5 mt-1 shrink-0">
 			<a
 				href="/automations"
@@ -323,6 +324,7 @@
 				<span class="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">Automations</span>
 			</a>
 		</div>
+		{/if}
 
 		<!-- Workspace section header -->
 		<div class="flex items-center justify-between h-8 pl-3.5 pr-1.5 shrink-0">

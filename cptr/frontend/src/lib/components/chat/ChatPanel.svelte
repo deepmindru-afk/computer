@@ -294,6 +294,8 @@
 
 	// ── Socket listener ─────────────────────────────────────────
 
+	let landingRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
 	function handleSocketEvent(data: {
 		chat_id: string;
 		message_id: string;
@@ -305,15 +307,25 @@
 	}) {
 		// On the landing page, update the chat list in place from socket events
 		if (isLanding) {
-			if (data.done) {
-				previousChats = previousChats.map((c) =>
-					c.id === data.chat_id ? { ...c, is_active: false } : c
-				);
-			}
-			if (data.title) {
-				previousChats = previousChats.map((c) =>
-					c.id === data.chat_id ? { ...c, title: data.title! } : c
-				);
+			const knownChat = previousChats.some((c) => c.id === data.chat_id);
+			if (!knownChat) {
+				// New chat created elsewhere — debounce-reload the list
+				if (landingRefreshTimer) clearTimeout(landingRefreshTimer);
+				landingRefreshTimer = setTimeout(() => {
+					landingRefreshTimer = null;
+					loadPreviousChats(chatPage);
+				}, 300);
+			} else {
+				if (data.done) {
+					previousChats = previousChats.map((c) =>
+						c.id === data.chat_id ? { ...c, is_active: false } : c
+					);
+				}
+				if (data.title) {
+					previousChats = previousChats.map((c) =>
+						c.id === data.chat_id ? { ...c, title: data.title! } : c
+					);
+				}
 			}
 		}
 
@@ -419,6 +431,7 @@
 			socket.off('events:chat', handleSocketEvent);
 			socket.off('connect', handleReconnect);
 		}
+		if (landingRefreshTimer) clearTimeout(landingRefreshTimer);
 		// Don't clear streamingChatTabs here -- the global listener in
 		// chat.ts handles cleanup when the "done" event arrives, so the
 		// spinner persists even when the chat tab is not active.
