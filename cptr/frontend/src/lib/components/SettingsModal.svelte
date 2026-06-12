@@ -53,7 +53,7 @@
 		{ id: 'connections', label: $t('admin.connections'), icon: 'plug' },
 		{ id: 'models', label: $t('admin.models'), icon: 'cube' },
 		{ id: 'messaging', label: $t('admin.messaging'), icon: 'chat-bubble' },
-		{ id: 'gateway', label: $t('admin.gateway.tab'), icon: 'shield' },
+		{ id: 'gateway', label: $t('admin.gateway.tab'), icon: 'gateway' },
 		{ id: 'audio', label: 'Audio', icon: 'microphone' },
 		{ id: 'browser', label: 'Browser', icon: 'browser' },
 		{ id: 'admin_settings', label: $t('settings.configuration'), icon: 'shield' }
@@ -92,7 +92,9 @@
 
 			<!-- Admin section -->
 			{#if isAdmin}
-				<span class="hidden md:block text-[10px] text-gray-400 dark:text-gray-600 px-2 mt-2 mb-0.5">{$t('sidebar.admin')}</span>
+				<span class="hidden md:block text-[10px] text-gray-400 dark:text-gray-600 px-2 mt-2 mb-0.5"
+					>{$t('sidebar.admin')}</span
+				>
 
 				{#each adminTabs as tab}
 					<button

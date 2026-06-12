@@ -189,6 +189,14 @@
 					<span class="text-gray-400 dark:text-gray-600">API Key:</span>
 					<span class="text-gray-700 dark:text-gray-300">sk-cptr-...</span>
 				</div>
+				<div>
+					<span class="text-gray-400 dark:text-gray-600">Header:</span>
+					<span class="text-gray-700 dark:text-gray-300">X-OpenWebUI-Chat-Id: {'{{CHAT_ID}}'}</span>
+				</div>
+				<div>
+					<span class="text-gray-400 dark:text-gray-600">Also accepts:</span>
+					<span class="text-gray-700 dark:text-gray-300">X-Chat-Id</span>
+				</div>
 			</div>
 		</div>
 	{/if}

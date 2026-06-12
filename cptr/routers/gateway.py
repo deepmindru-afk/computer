@@ -1,15 +1,15 @@
 """Gateway: expose cptr workspaces as OpenAI-compatible models.
 
-GET  /v1/models           — list workspaces in OpenAI model-list format
-POST /v1/chat/completions — run the agentic loop on a workspace, stream SSE
+GET  /v1/models           - list workspaces in OpenAI model-list format
+POST /v1/chat/completions - run the agentic loop on a workspace, stream SSE
 
-Any OpenAI-compatible client (Open-WebUI, curl, Python SDK) can connect
+Any OpenAI-compatible client (Open WebUI, curl, Python SDK) can connect
 to cptr and use each workspace as a "model" that can read files, edit code,
 run commands, and use skills.
 
-Session mapping: if the caller sends X-OpenWebUI-Chat-Id (OWUI does this
-when ENABLE_FORWARD_USER_INFO_HEADERS=true), the same cptr chat is reused
-across turns.  Otherwise each request creates a fresh chat.
+Session mapping: if the caller sends X-Chat-Id or X-OpenWebUI-Chat-Id,
+the same cptr chat is reused across turns. Otherwise each request creates
+a fresh chat.
 
 Auth: Bearer token validated against hashed keys in the Config store.
 """
@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["gateway"])
 
-# Header that Open-WebUI sends with the chat ID (configurable on OWUI side).
+# Headers that clients can send with the chat ID.
+CHAT_ID_HEADER = "X-Chat-Id"
 OWUI_CHAT_ID_HEADER = "X-OpenWebUI-Chat-Id"
 
 
@@ -56,8 +57,6 @@ async def _save_api_keys(keys: list[dict]) -> None:
 
 def _hash_key(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
-
-
 
 
 async def _validate_bearer(request: Request) -> str:
@@ -107,15 +106,17 @@ async def list_models(request: Request):
         else:
             model_id = f"cptr/{basename}"
 
-        models.append({
-            "id": model_id,
-            "object": "model",
-            "created": ws.created_at or int(time.time()),
-            "owned_by": "cptr",
-            "name": f"{ws.name} — {ws.path}",
-            # Extra metadata for cptr
-            "cptr_workspace": ws.path,
-        })
+        models.append(
+            {
+                "id": model_id,
+                "object": "model",
+                "created": ws.created_at or int(time.time()),
+                "owned_by": "cptr",
+                "name": f"{ws.name} - {ws.path}",
+                # Extra metadata for cptr
+                "cptr_workspace": ws.path,
+            }
+        )
 
     return {"object": "list", "data": models}
 
@@ -150,9 +151,9 @@ async def create_chat_completion(request: Request, body: ChatCompletionRequest):
     connection, bare_model, model_id = await _resolve_model_connection(workspace)
 
     # 3. Session mapping: find or create a cptr chat
-    owui_chat_id = request.headers.get(OWUI_CHAT_ID_HEADER)
+    client_chat_id = request.headers.get(CHAT_ID_HEADER) or request.headers.get(OWUI_CHAT_ID_HEADER)
     chat_id = await _find_or_create_chat(
-        user_id, workspace, owui_chat_id, body.messages, model_id
+        user_id, workspace, client_chat_id, body.messages, model_id
     )
 
     # 4. Create user + assistant messages
@@ -189,12 +190,14 @@ async def create_chat_completion(request: Request, body: ChatCompletionRequest):
 
     # Export JSON so cptr sidebar sees it immediately
     from cptr.utils.chat_export import export_chat_to_file
+
     await export_chat_to_file(chat_id)
 
     # 5. Create output queue and start the agentic loop
     output_queue: asyncio.Queue = asyncio.Queue()
 
     from cptr.utils.chat_task import start_task
+
     start_task(
         message_id=assistant_msg.id,
         chat_id=chat_id,
@@ -227,11 +230,13 @@ async def create_chat_completion(request: Request, body: ChatCompletionRequest):
             "object": "chat.completion",
             "created": created,
             "model": body.model,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": full_text},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": full_text},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
@@ -257,11 +262,13 @@ async def _sse_generator(
             "object": "chat.completion.chunk",
             "created": created,
             "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": delta,
-                "finish_reason": finish_reason,
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": finish_reason,
+                }
+            ],
         }
         return f"data: {json.dumps(data)}\n\n"
 
@@ -272,7 +279,7 @@ async def _sse_generator(
         try:
             event = await asyncio.wait_for(queue.get(), timeout=300)
         except asyncio.TimeoutError:
-            # Safety timeout — end the stream
+            # Safety timeout, end the stream
             yield _chunk({}, "stop")
             yield "data: [DONE]\n\n"
             return
@@ -304,7 +311,7 @@ async def _sse_generator(
             yield "data: [DONE]\n\n"
             return
 
-        # Other event types (tool calls, etc.) are silently consumed —
+        # Other event types (tool calls, etc.) are silently consumed,
         # they're persisted in cptr's DB and visible in its sidebar.
 
 
@@ -402,9 +409,7 @@ async def _resolve_model_connection(workspace: str) -> tuple[dict, str, str]:
             full = f"{prefix}/{bare}" if prefix else bare
             return conn, bare, full
 
-    raise HTTPException(
-        503, "No model connections configured. Add a connection in cptr settings."
-    )
+    raise HTTPException(503, "No model connections configured. Add a connection in cptr settings.")
 
 
 # ── Session mapping ──────────────────────────────────────────
@@ -413,28 +418,29 @@ async def _resolve_model_connection(workspace: str) -> tuple[dict, str, str]:
 async def _find_or_create_chat(
     user_id: str,
     workspace: str,
-    owui_chat_id: str | None,
+    client_chat_id: str | None,
     messages: list[dict],
     model_id: str,
 ) -> str:
-    """Find an existing cptr chat for this OWUI conversation, or create one."""
+    """Find an existing cptr chat for this client conversation, or create one."""
 
-    if owui_chat_id:
-        # Search for a chat with this OWUI chat ID in metadata
+    if client_chat_id:
+        # Search for a chat with this client chat ID in metadata
         from cptr.utils.db import get_db
         from sqlalchemy import select
 
         async with await get_db() as db:
-            result = await db.execute(
-                select(Chat).where(Chat.user_id == user_id)
-            )
+            result = await db.execute(select(Chat).where(Chat.user_id == user_id))
             for chat in result.scalars():
                 meta = chat.meta or {}
-                if meta.get("owui_chat_id") == owui_chat_id:
+                if (
+                    meta.get("client_chat_id") == client_chat_id
+                    or meta.get("owui_chat_id") == client_chat_id
+                ):
                     return chat.id
 
     # Create a new chat
-    title = "Open-WebUI Chat"
+    title = "Open WebUI Chat"
     if messages:
         first_user = next(
             (m.get("content", "")[:50] for m in messages if m.get("role") == "user"),
@@ -447,8 +453,9 @@ async def _find_or_create_chat(
         "workspace": workspace,
         "params": {"tool_approval_mode": "full"},
     }
-    if owui_chat_id:
-        meta["owui_chat_id"] = owui_chat_id
+    if client_chat_id:
+        meta["client_chat_id"] = client_chat_id
+        meta["owui_chat_id"] = client_chat_id
 
     chat = await Chat.create(
         user_id=user_id,
@@ -474,7 +481,7 @@ class CreateApiKeyRequest(BaseModel):
 
 @router.post("/keys")
 async def create_api_key(request: Request, body: CreateApiKeyRequest):
-    """Create a new API key (requires cookie auth — admin only)."""
+    """Create a new API key (requires cookie auth, admin only)."""
     from cptr.utils.config import check_access
 
     client_host = request.client.host if request.client else "127.0.0.1"

@@ -412,7 +412,7 @@
 
 	"admin.gateway.tab": "Gateway",
 	"admin.gateway.title": "API Gateway",
-	"admin.gateway.description": "Generate API keys to connect Open-WebUI or any OpenAI-compatible client to your workspaces.",
+	"admin.gateway.description": "Generate API keys to connect Open WebUI or any OpenAI-compatible client to your workspaces.",
 	"admin.gateway.loadError": "Failed to load API keys",
 	"admin.gateway.createKey": "Create key",
 	"admin.gateway.keyNamePlaceholder": "Key name (e.g. open-webui)",
@@ -424,7 +424,7 @@
 	"admin.gateway.noKeys": "No API keys yet",
 	"admin.gateway.newKey": "New API key created. Copy it now",
 	"admin.gateway.keyWarning": "This key will only be shown once. Store it securely.",
-	"admin.gateway.howToConnect": "Connect from Open-WebUI",
+	"admin.gateway.howToConnect": "Connect from Open WebUI",
 
 	"admin.messaging": "Messaging",
 
