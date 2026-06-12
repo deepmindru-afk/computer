@@ -69,6 +69,15 @@ async def shutdown():
     bot_manager = getattr(app.state, "bot_manager", None)
     if bot_manager:
         await bot_manager.stop_all()
+    # Clean up browser sessions and launched Chrome
+    try:
+        from cptr.utils.browser.session import session_manager
+        from cptr.utils.browser.launcher import shutdown_browser
+
+        await session_manager.close_all()
+        await shutdown_browser()
+    except Exception:
+        pass
 
 
 # Auth middleware

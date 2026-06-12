@@ -27,7 +27,7 @@
 </script>
 
 <div
-	class="fixed z-50 w-72 max-h-48 overflow-y-auto rounded-xl bg-white dark:bg-[#1a1a1a] border border-gray-150 dark:border-white/6 shadow-xl p-0.5"
+	class="fixed z-50 w-64 max-h-48 overflow-y-auto rounded-xl bg-white dark:bg-[#1a1a1a] border border-gray-150 dark:border-white/6 shadow-xl p-0.5"
 >
 	{#if items.length === 0}
 		<div class="px-3 py-2 text-xs text-gray-400 dark:text-gray-600">No skills found</div>

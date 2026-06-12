@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from typing import Dict, List
 
@@ -187,6 +188,24 @@ def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
             content = formatted_content
         if role == "tool":
             # tool result → Anthropic tool_result block
+            # Content may be a string or a list of blocks (multimodal image results)
+            if isinstance(content, list):
+                # Multimodal tool result — convert blocks to Anthropic format
+                tool_content = []
+                for block in content:
+                    if block.get("type") == "text":
+                        tool_content.append({"type": "text", "text": block.get("text", "")})
+                    elif block.get("type") == "image":
+                        tool_content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": block.get("media_type", "image/jpeg"),
+                                "data": block.get("base64", ""),
+                            }
+                        })
+            else:
+                tool_content = content
             result.append(
                 {
                     "role": "user",
@@ -194,7 +213,7 @@ def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
                         {
                             "type": "tool_result",
                             "tool_use_id": m.get("tool_call_id", ""),
-                            "content": content,
+                            "content": tool_content,
                         }
                     ],
                 }
@@ -338,6 +357,9 @@ def _to_openai_messages(messages: list[dict], instructions: str) -> list[dict]:
             for block in content:
                 if block.get("type") == "text":
                     formatted_content.append({"type": "text", "text": block.get("text", "")})
+                elif block.get("type") == "image_url":
+                    # Already in OpenAI-native format (e.g. from image extraction)
+                    formatted_content.append(block)
                 elif block.get("type") == "image":
                     data_uri = f"data:{block.get('media_type', 'image/jpeg')};base64,{block.get('base64', '')}"
                     formatted_content.append({
@@ -460,22 +482,39 @@ def _to_responses_input(messages: list[dict], instructions: str) -> list[dict]:
         if role == "system":
             continue
         if role == "tool":
+            content = m.get("content", "")
+            if isinstance(content, list):
+                # Multimodal tool content — extract text only for output
+                # (images are handled in the agentic loop)
+                text_parts = []
+                for block in content:
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                content = "\n".join(text_parts)
             items.append(
                 {
                     "type": "function_call_output",
                     "call_id": m.get("tool_call_id", ""),
-                    "output": m.get("content", ""),
+                    "output": content,
+                    "status": "completed",
                 }
             )
         elif role == "assistant" and m.get("tool_calls"):
             for tc in m["tool_calls"]:
+                args = tc["function"].get("arguments", "{}")
+                call_id = tc.get("id", "")
+                # Responses API requires id to start with "fc_"
+                fc_id = tc.get("fc_id", "")
+                if not fc_id or not fc_id.startswith("fc_"):
+                    fc_id = f"fc_{call_id.replace('call_', '', 1) or uuid.uuid4().hex}"
                 items.append(
                     {
                         "type": "function_call",
-                        "id": tc.get("id", ""),
-                        "call_id": tc.get("id", ""),
+                        "id": fc_id,
+                        "call_id": call_id,
                         "name": tc["function"]["name"],
-                        "arguments": tc["function"].get("arguments", "{}"),
+                        "arguments": args if isinstance(args, str) else json.dumps(args),
+                        "status": "completed",
                     }
                 )
         else:
@@ -486,15 +525,14 @@ def _to_responses_input(messages: list[dict], instructions: str) -> list[dict]:
                     if block.get("type") == "text":
                         formatted_content.append({"type": "input_text", "text": block.get("text", "")})
                     elif block.get("type") == "image":
-                        # Not all models support input_image, but this is the Responses API spec
                         data_uri = f"data:{block.get('media_type', 'image/jpeg')};base64,{block.get('base64', '')}"
                         formatted_content.append({
                             "type": "input_image",
                             "image_url": data_uri
                         })
-                items.append({"role": role, "content": formatted_content})
+                items.append({"type": "message", "role": role, "content": formatted_content})
             else:
-                items.append({"role": role, "content": content})
+                items.append({"type": "message", "role": role, "content": content})
     return items
 
 
@@ -529,17 +567,26 @@ async def stream_openai_responses(
         try:
             async with httpx.AsyncClient(timeout=_STREAM_TIMEOUT) as client:
                 logger.info(
-                    "[stream] openai responses POST %s/responses model=%s", url, form_data.model
+                    "[stream] openai responses POST %s/responses model=%s input_items=%d types=%s",
+                    url, form_data.model,
+                    len(body.get("input", [])),
+                    [i.get("type", i.get("role", "?")) for i in body.get("input", [])],
                 )
                 async with client.stream(
                     "POST", f"{url}/responses", json=body, headers=headers
                 ) as resp:
                     logger.info("[stream] openai responses status=%s", resp.status_code)
+                    if resp.status_code >= 400:
+                        error_body = await resp.aread()
+                        logger.error("[stream] openai responses error body: %s", error_body.decode(errors="replace"))
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
                         if not line.startswith("data: "):
                             continue
-                        event = json.loads(line[6:])
+                        raw = line[6:]
+                        if raw == "[DONE]":
+                            break
+                        event = json.loads(raw)
                         etype = event.get("type")
 
                         if etype == "response.output_text.delta":
@@ -552,10 +599,16 @@ async def stream_openai_responses(
                                 emitted = True
                                 yield {
                                     "type": "tool_call",
+                                    "id": item.get("id", ""),
                                     "call_id": item["call_id"],
                                     "name": item["name"],
                                     "arguments": json.loads(item["arguments"]),
                                 }
+
+                        elif etype == "response.failed":
+                            error = event.get("response", {}).get("error", {})
+                            msg = error.get("message", "Response failed")
+                            raise RuntimeError(f"Responses API error: {msg}")
 
                         elif etype == "response.completed":
                             usage = event.get("response", {}).get("usage", {})

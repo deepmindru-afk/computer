@@ -174,14 +174,17 @@ async def delete_bot_config(bot_id: str) -> bool:
 
 
 async def find_chat_for_thread(bot_id: str, external_thread_id: str) -> str | None:
-    """Find an existing cptr chat_id for a platform thread.
+    """Find the most recent cptr chat_id for a platform thread.
 
-    Scans chats with matching bridge metadata.  This is fine for the
-    small number of active bridge threads (typically < 100).
+    Scans chats with matching bridge metadata and returns the newest one,
+    so /new (which creates a new chat with the same thread ID) takes effect.
     """
     from cptr.models import Chat
     from cptr.utils.db import get_db
     from sqlalchemy import select
+
+    best_id = None
+    best_ts = -1
 
     async with await get_db() as db:
         result = await db.execute(
@@ -193,8 +196,11 @@ async def find_chat_for_thread(bot_id: str, external_thread_id: str) -> str | No
                 meta.get("bridge_bot_id") == bot_id
                 and meta.get("bridge_external_thread_id") == external_thread_id
             ):
-                return chat.id
-    return None
+                ts = getattr(chat, "created_at", 0) or 0
+                if ts > best_ts:
+                    best_ts = ts
+                    best_id = chat.id
+    return best_id
 
 
 # ── BotManager ───────────────────────────────────────────────

@@ -560,7 +560,7 @@ async def _load_message_history(
                 
                 text_content = entry["content"]
                 
-                # Append file:// references so the AI can read them with view_file
+                # Append file:// references so the AI can read them with read_file
                 if non_images:
                     from cptr.utils.storage import UPLOADS_DIR
                     file_refs = []
@@ -600,16 +600,18 @@ async def _load_message_history(
             tool_calls = []
             for item in m.output:
                 if item.get("type") == "function_call" and item.get("status") == "completed":
-                    tool_calls.append(
-                        {
-                            "id": item["call_id"],
-                            "type": "function",
-                            "function": {
-                                "name": item["name"],
-                                "arguments": json.dumps(item.get("arguments", {})),
-                            },
-                        }
-                    )
+                    tc = {
+                        "id": item["call_id"],
+                        "type": "function",
+                        "function": {
+                            "name": item["name"],
+                            "arguments": json.dumps(item.get("arguments", {})),
+                        },
+                    }
+                    # Preserve Responses API fc_ ID for round-tripping
+                    if item.get("fc_id"):
+                        tc["fc_id"] = item["fc_id"]
+                    tool_calls.append(tc)
             if tool_calls:
                 entry["tool_calls"] = tool_calls
 
@@ -627,12 +629,32 @@ async def _load_message_history(
     return result, existing_summary
 
 
+def _parse_image_data_uri(result: str) -> tuple[str, str] | None:
+    """Check if a tool result is a data URI image (from read_file on image files).
+
+    Returns (media_type, base64_data) if it's a data URI image, else None.
+    """
+    if not result.startswith("data:image/"):
+        return None
+    # data:image/png;base64,iVBOR...
+    try:
+        header, b64_data = result.split(",", 1)
+        media_type = header.split(";")[0].replace("data:", "")
+        return media_type, b64_data
+    except (ValueError, IndexError):
+        return None
+
+
 def _append_tool_to_messages(messages: list[dict], event: dict, result: str, provider: str):
     """Append a tool call + result to the message history for the next API call."""
-    # Guard against oversized tool outputs
-    if len(result) > CHAT_TOOL_MAX_CHARS:
-        half = CHAT_TOOL_MAX_CHARS // 2
-        result = result[:half] + "\n\n...(truncated)...\n\n" + result[-half:]
+    # Check for image result before truncation (data URI is large but needed)
+    image = _parse_image_data_uri(result)
+
+    if not image:
+        # Guard against oversized tool outputs (skip for images, handled above)
+        if len(result) > CHAT_TOOL_MAX_CHARS:
+            half = CHAT_TOOL_MAX_CHARS // 2
+            result = result[:half] + "\n\n...(truncated)...\n\n" + result[-half:]
 
     # Add assistant message with tool_call
     messages.append(
@@ -642,6 +664,7 @@ def _append_tool_to_messages(messages: list[dict], event: dict, result: str, pro
             "tool_calls": [
                 {
                     "id": event["call_id"],
+                    "fc_id": event.get("id", ""),
                     "type": "function",
                     "function": {
                         "name": event["name"],
@@ -651,14 +674,35 @@ def _append_tool_to_messages(messages: list[dict], event: dict, result: str, pro
             ],
         }
     )
-    # Add tool result
-    messages.append(
-        {
-            "role": "tool",
-            "tool_call_id": event["call_id"],
-            "content": result,
-        }
-    )
+
+    if image:
+        # Structured multimodal content — provider converters handle the
+        # "image" block type appropriately for each API.
+        media_type, b64_data = image
+        path = event["arguments"].get("path", "image")
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": event["call_id"],
+                "content": [
+                    {"type": "text", "text": f"Image file: {path}"},
+                    {
+                        "type": "image",
+                        "media_type": media_type,
+                        "base64": b64_data,
+                    },
+                ],
+            }
+        )
+    else:
+        # Plain text tool result
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": event["call_id"],
+                "content": result,
+            }
+        )
 
 
 def _find_safe_split(messages: list[dict], target_keep: int) -> int:
@@ -798,7 +842,7 @@ async def run_chat_task(
             system += f"\n\n[CONVERSATION SUMMARY]\n{loaded_summary}"
         if regeneration_prompt:
             messages.append({"role": "user", "content": regeneration_prompt})
-        tools = get_tool_list()
+        tools = await get_tool_list()
 
         # Remove view_skill tool if no skills are available
         skills = discover_skills(workspace)
@@ -902,9 +946,36 @@ async def run_chat_task(
                     message_id[:8], len(drop_zone), len(keep_zone), len(summary),
                 )
 
+            # Anthropic supports images natively in tool_result content blocks.
+            # Chat Completions and Responses API don't support multimodal tool messages,
+            # so extract images into a follow-up user message.
+            api_messages = messages
+            if provider != "anthropic":
+                image_blocks = []
+                api_messages = []
+                for m in messages:
+                    if m.get("role") == "tool" and isinstance(m.get("content"), list):
+                        text_parts = []
+                        for part in m["content"]:
+                            if part.get("type") == "text":
+                                text_parts.append(part.get("text", ""))
+                            elif part.get("type") == "image":
+                                image_blocks.append(part)
+                        api_messages.append({**m, "content": "\n".join(text_parts)})
+                    else:
+                        api_messages.append(m)
+                if image_blocks:
+                    api_messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Here are the images from the tool results above."},
+                            *image_blocks,
+                        ],
+                    })
+
             form_data = ChatCompletionForm(
                 model=model,
-                messages=messages,
+                messages=api_messages,
                 instructions=system,
                 tools=tools,
             )
@@ -935,6 +1006,7 @@ async def run_chat_task(
                         "type": "function_call",
                         "id": str(uuid.uuid4()),
                         "call_id": event["call_id"],
+                        "fc_id": event.get("id", ""),
                         "name": name,
                         "arguments": event["arguments"],
                     }
@@ -955,7 +1027,7 @@ async def run_chat_task(
                         if name == "create_artifact":
                             result = await create_artifact(**event["arguments"], workspace=workspace)
                         else:
-                            result = await execute_tool(name, event["arguments"], {"workspace": workspace, "user_id": user_id, "model_id": model})
+                            result = await execute_tool(name, event["arguments"], {"workspace": workspace, "user_id": user_id, "model_id": model, "chat_id": chat_id})
 
                         # Update status to completed
                         item["status"] = "completed"
@@ -1073,15 +1145,35 @@ async def run_chat_task(
     except Exception as e:
         logger.exception(f"Chat task error for message {message_id}")
         _flush_text()
+        error_msg = str(e)
+        # Try to extract API error body for more detail
+        if hasattr(e, 'response'):
+            try:
+                body = e.response.text or ""
+                if body:
+                    import json as _json
+                    err_data = _json.loads(body)
+                    api_msg = err_data.get("error", {}).get("message", "")
+                    if api_msg:
+                        error_msg = api_msg
+            except Exception:
+                pass
+        # Append error to content so it's visible in the chat
+        error_block = f"\n\n> **Error:** {error_msg}"
+        content += error_block
+        text_buffer += error_block
+        flushed_item = _flush_text()
+        if flushed_item:
+            await emit(output=flushed_item)
         await ChatMessage.update(
             message_id,
             content=content,
             output=output_items,
             done=True,
-            meta={"error": str(e)},
+            meta={"error": error_msg},
         )
         _task_state.pop(message_id, None)
-        await _emit_done()
+        await emit(done=True, error=error_msg)
     finally:
         _tasks.pop(message_id, None)
         _task_state.pop(message_id, None)

@@ -38,6 +38,7 @@
 	import AssistantMessage from './AssistantMessage.svelte';
 	import ChatHistory from './ChatHistory.svelte';
 	import Spinner from '../common/Spinner.svelte';
+	import { toast } from 'svelte-sonner';
 
 	interface Props {
 		workspace: string;
@@ -307,6 +308,7 @@
 		delta?: string;
 		output?: any;
 		done?: boolean;
+		error?: string;
 		queue_processed?: boolean;
 		title?: string;
 	}) {
@@ -374,6 +376,9 @@
 				msg.output = [...existing, data.output];
 			}
 			allMessages = [...allMessages];
+		}
+		if (data.error) {
+			toast.error(data.error, { duration: 8000 });
 		}
 		if (data.done) {
 			// Clear streaming indicator for this tab

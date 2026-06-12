@@ -4,6 +4,7 @@
 	import General from './Settings/General.svelte';
 	import Account from './Settings/Account.svelte';
 	import Keyboard from './Settings/Keyboard.svelte';
+	import Browser from './Settings/Browser.svelte';
 	import About from './Settings/About.svelte';
 	import Users from './Admin/Users.svelte';
 	import Connections from './Admin/Connections.svelte';
@@ -16,6 +17,7 @@
 	type Tab =
 		| 'general'
 		| 'keyboard'
+		| 'browser'
 		| 'account'
 		| 'about'
 		| 'users'
@@ -47,6 +49,7 @@
 		{ id: 'connections', label: $t('admin.connections'), icon: 'plug' },
 		{ id: 'models', label: $t('admin.models'), icon: 'cube' },
 		{ id: 'messaging', label: $t('admin.messaging'), icon: 'chat-bubble' },
+		{ id: 'browser', label: 'Browser', icon: 'browser' },
 		{ id: 'admin_settings', label: $t('settings.configuration'), icon: 'shield' }
 	]);
 </script>
@@ -106,6 +109,8 @@
 			<General />
 		{:else if activeTab === 'keyboard'}
 			<Keyboard />
+		{:else if activeTab === 'browser'}
+			<Browser />
 		{:else if activeTab === 'account'}
 			<Account />
 		{:else if activeTab === 'about'}

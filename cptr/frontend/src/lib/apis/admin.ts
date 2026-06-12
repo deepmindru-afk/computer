@@ -54,8 +54,8 @@ export const getAdminConfig = async (): Promise<Record<string, unknown>> => {
 
 export const updateConfig = (config: Record<string, unknown>) =>
 	fetchJSON('/api/admin/config', {
-		method: 'PUT',
-		...jsonBody({ config })
+		...jsonBody({ config }),
+		method: 'PUT'
 	});
 
 // ── Connections ─────────────────────────────────────────────
