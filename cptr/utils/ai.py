@@ -26,6 +26,17 @@ from cptr.env import (
 
 logger = logging.getLogger(__name__)
 
+
+def _openrouter_headers(url: str) -> dict[str, str]:
+    """Return OpenRouter app-info headers when the URL is an OpenRouter endpoint."""
+    if "openrouter.ai" in url:
+        return {
+            "HTTP-Referer": "https://cptr.sh/",
+            "X-Title": "cptr / open-webui",
+        }
+    return {}
+
+
 _STREAM_RETRY_ATTEMPTS = 3
 _STREAM_TIMEOUT = httpx.Timeout(
     STREAM_CONNECT_TIMEOUT_SECONDS,
@@ -87,6 +98,7 @@ async def chat_completion(
                 headers={
                     "x-api-key": api_key,
                     "anthropic-version": "2023-06-01",
+                    **_openrouter_headers(base_url),
                 },
             )
         elif api_type == "responses":
@@ -103,7 +115,7 @@ async def chat_completion(
             resp = await client.post(
                 f"{base_url}/responses",
                 json=body_r,
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers={"Authorization": f"Bearer {api_key}", **_openrouter_headers(base_url)},
             )
         else:
             # OpenAI Chat Completions (default)
@@ -120,7 +132,7 @@ async def chat_completion(
             resp = await client.post(
                 f"{base_url}/chat/completions",
                 json=body_cc,
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers={"Authorization": f"Bearer {api_key}", **_openrouter_headers(base_url)},
             )
         if resp.status_code >= 400:
             logger.debug(
@@ -231,7 +243,7 @@ async def stream_anthropic(
         body.update(request_params)
     # Remove None values
     body = {k: v for k, v in body.items() if v is not None}
-    headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01", **_openrouter_headers(url)}
 
     emitted = False
     for attempt in range(_STREAM_RETRY_ATTEMPTS):
@@ -365,7 +377,7 @@ async def stream_openai_completions(
         body["tools"] = tools
     if request_params:
         body.update(request_params)
-    headers = {"Authorization": f"Bearer {key}"}
+    headers = {"Authorization": f"Bearer {key}", **_openrouter_headers(url)}
 
     emitted = False
     for attempt in range(_STREAM_RETRY_ATTEMPTS):
@@ -510,7 +522,7 @@ async def stream_openai_responses(
         body["tools"] = tools
     if request_params:
         body.update(request_params)
-    headers = {"Authorization": f"Bearer {key}"}
+    headers = {"Authorization": f"Bearer {key}", **_openrouter_headers(url)}
 
     emitted = False
     for attempt in range(_STREAM_RETRY_ATTEMPTS):

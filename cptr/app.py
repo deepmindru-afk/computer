@@ -9,6 +9,8 @@ from cptr.routers import (
     admin_router,
     auth_router,
     automations_router,
+    bridge_router,
+    webhook_router,
     chat_router,
     events_router,
     files_router,
@@ -54,6 +56,19 @@ async def startup():
     from cptr.utils.automations import scheduler_worker_loop
 
     asyncio.create_task(scheduler_worker_loop(app))
+
+    # Start messaging bots
+    from cptr.utils.bridge import BotManager
+
+    app.state.bot_manager = BotManager()
+    asyncio.create_task(app.state.bot_manager.start_all())
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    bot_manager = getattr(app.state, "bot_manager", None)
+    if bot_manager:
+        await bot_manager.stop_all()
 
 
 # Auth middleware
@@ -187,6 +202,8 @@ async def get_config():
 app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(automations_router)
+app.include_router(bridge_router)
+app.include_router(webhook_router)
 app.include_router(chat_router)
 app.include_router(events_router)
 app.include_router(files_router)

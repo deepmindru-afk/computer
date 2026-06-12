@@ -10,20 +10,21 @@
 	} from '$lib/stores/keybindings';
 	import type { ActionId } from '$lib/stores/keybindings';
 	import KeyPill from '../KeyPill.svelte';
+	import { t } from '$lib/i18n';
 
 	/** Action descriptions for the second line. */
-	const ACTION_DESCRIPTIONS: Record<ActionId, string> = {
-		newFile: 'Open a new untitled file',
-		newTerminal: 'Open a new terminal session',
-		newChat: 'Start a new AI chat',
-		closeTab: 'Close the active tab',
-		nextTab: 'Switch to the next tab',
-		prevTab: 'Switch to the previous tab',
-		quickOpen: 'Search and open files quickly',
-		openSettings: 'Open the settings panel',
-		toggleSplit: 'Toggle split editor view',
-		toggleSidebar: 'Show or hide the sidebar'
-	};
+	const ACTION_DESCRIPTIONS: Record<ActionId, string> = $derived({
+		newFile: $t('keyboard.newFile'),
+		newTerminal: $t('keyboard.newTerminal'),
+		newChat: $t('keyboard.newChat'),
+		closeTab: $t('keyboard.closeTab'),
+		nextTab: $t('keyboard.nextTab'),
+		prevTab: $t('keyboard.prevTab'),
+		quickOpen: $t('keyboard.quickOpen'),
+		openSettings: $t('keyboard.openSettings'),
+		toggleSplit: $t('keyboard.toggleSplit'),
+		toggleSidebar: $t('keyboard.toggleSidebar')
+	});
 
 	let recordingAction = $state<ActionId | null>(null);
 
@@ -77,18 +78,18 @@
 
 <div class="flex flex-col min-h-full">
 	<div class="flex items-center justify-between mb-3">
-		<h2 class="text-sm font-medium text-gray-900 dark:text-white">Keyboard Shortcuts</h2>
+		<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('keyboard.title')}</h2>
 		<button
 			class="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
-			onclick={resetKeybindings}>Reset defaults</button
+			onclick={resetKeybindings}>{$t('keyboard.resetDefaults')}</button
 		>
 	</div>
 
 	<!-- Column headers -->
 	<div class="flex items-center gap-2 mb-0.5 px-1">
-		<span class="flex-1 text-[10px] font-medium text-gray-400 dark:text-gray-600">Command</span>
+		<span class="flex-1 text-[10px] font-medium text-gray-400 dark:text-gray-600">{$t('keyboard.command')}</span>
 		<span class="w-[140px] text-[10px] font-medium text-gray-400 dark:text-gray-600 text-right"
-			>Keybinding</span
+			>{$t('keyboard.keybinding')}</span
 		>
 	</div>
 
@@ -110,7 +111,7 @@
 
 				<div class="w-[140px] flex items-center justify-end shrink-0">
 					{#if isRecording}
-						<span class="recording-indicator">Press keys…</span>
+						<span class="recording-indicator">{$t('keyboard.pressKeys')}</span>
 					{:else if chord}
 						<button
 							class="cursor-pointer"
@@ -122,7 +123,7 @@
 					{:else}
 						<button
 							class="text-[10px] text-gray-500 dark:text-gray-600 cursor-pointer hover:text-gray-400 transition-colors duration-75"
-							onclick={() => startRecording(actionId)}>Unassigned</button
+							onclick={() => startRecording(actionId)}>{$t('keyboard.unassigned')}</button
 						>
 					{/if}
 
@@ -138,7 +139,7 @@
 	</div>
 
 	<p class="text-[10px] text-gray-400 dark:text-gray-600 mt-3">
-		Click a binding to rebind. Press <kbd class="kbd-inline">Esc</kbd> to cancel.
+		{$t('keyboard.rebindHint')}
 	</p>
 </div>
 

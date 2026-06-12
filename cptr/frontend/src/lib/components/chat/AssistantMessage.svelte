@@ -11,6 +11,7 @@
 		content: string;
 		done: boolean;
 		output: any[] | null;
+		usage: Record<string, number> | null;
 		chatId: string | null;
 		messageId: string;
 		siblingIndex?: number;
@@ -24,6 +25,7 @@
 		content,
 		done,
 		output,
+		usage,
 		chatId,
 		messageId,
 		siblingIndex = 0,
@@ -38,6 +40,7 @@
 	let editedContent = $state('');
 	let editedOutput = $state<any[] | null>(null);
 	let copied = $state(false);
+	let showUsageTooltip = $state(false);
 	let textareaEl: HTMLTextAreaElement;
 
 	// Track which tool call outputs are expanded
@@ -279,6 +282,23 @@
 	function groupHasRejected(calls: any[]): boolean {
 		return calls.some((c: any) => c.status === 'rejected');
 	}
+
+	/** Format usage data for tooltip display */
+	function formatUsageLabel(key: string): string {
+		return key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+	}
+
+	function formatUsageValue(key: string, value: number): string {
+		if (key.includes('time') || key.includes('duration') || key.includes('latency')) {
+			if (value >= 1000) return `${(value / 1000).toFixed(2)}s`;
+			return `${value.toFixed(0)}ms`;
+		}
+		if (key.includes('token') || key.includes('count')) {
+			return value.toLocaleString();
+		}
+		if (Number.isInteger(value)) return value.toLocaleString();
+		return value.toFixed(2);
+	}
 </script>
 
 <div class="flex flex-col gap-1">
@@ -360,8 +380,19 @@
 							}}
 						>
 							<div class="flex items-center gap-2 px-3 pt-2.5 pb-0.5">
-								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-3.5 shrink-0 text-gray-400 dark:text-gray-500">
-									<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									fill="none"
+									viewBox="0 0 24 24"
+									stroke-width="1.5"
+									stroke="currentColor"
+									class="size-3.5 shrink-0 text-gray-400 dark:text-gray-500"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+									/>
 								</svg>
 								<span class="text-xs font-medium text-gray-800 dark:text-gray-100"
 									>{artifact.title || 'Artifact'}</span
@@ -384,7 +415,7 @@
 						{@const isGroupOpen = expandedGroups.has(groupIdx)}
 						{@const hasPendingApproval = calls.some((c: any) => c.status === 'pending')}
 
-						<div class="w-full min-w-0">
+						<div class="w-full min-w-0 flex flex-col my-0.5">
 							<!-- Group header -->
 							<button
 								class="w-full min-w-0 text-left text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition cursor-pointer"
@@ -392,7 +423,9 @@
 								aria-expanded={isGroupOpen}
 								onclick={() => toggleGroupExpanded(groupIdx)}
 							>
-								<div class="flex items-center gap-1.5 text-sm min-w-0 {hasPending ? 'shimmer' : ''}">
+								<div
+									class="flex items-center gap-1.5 text-sm min-w-0 {hasPending ? 'shimmer' : ''}"
+								>
 									<!-- Status icon -->
 									{#if hasPending}
 										<div class="flex justify-center text-center">
@@ -526,14 +559,16 @@
 											{@const isExpanded = expandedCalls.has(callId)}
 											{@const pairedOutput = outputs.get(item.call_id)}
 
-											<div class="w-full min-w-0">
+											<div class="w-full min-w-0 flex flex-col">
 												<!-- Individual tool call row -->
 												<button
 													class="w-full min-w-0 text-left text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition cursor-pointer"
 													onclick={() => toggleCallExpanded(callId)}
 												>
 													<div
-														class="flex items-center gap-1.5 text-sm min-w-0 {isExecuting ? 'shimmer' : ''}"
+														class="flex items-center gap-1.5 text-sm min-w-0 {isExecuting
+															? 'shimmer'
+															: ''}"
 													>
 														<!-- Status icon -->
 														{#if isExecuting}
@@ -783,7 +818,8 @@
 								<div class="mt-1 space-y-0.5">
 									{#each calls.filter((c: any) => c.status === 'pending') as item}
 										<div class="flex items-center gap-2 py-1 px-1">
-											<span class="text-xs text-gray-500 dark:text-gray-400 flex-1 min-w-0 line-clamp-1"
+											<span
+												class="text-xs text-gray-500 dark:text-gray-400 flex-1 min-w-0 line-clamp-1"
 												>{toolLabel(item.name, item.arguments || {})}</span
 											>
 											<span class="flex gap-1 shrink-0">
@@ -934,9 +970,60 @@
 						>
 					</button>
 				{/if}
+				{#if done && usage && Object.keys(usage).length > 0}
+					<div class="relative flex items-center">
+						<button
+							class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
+							onclick={() => (showUsageTooltip = !showUsageTooltip)}
+							onmouseenter={() => (showUsageTooltip = true)}
+							onmouseleave={() => (showUsageTooltip = false)}
+							aria-label="Usage info"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="2"
+								stroke="currentColor"
+								class="w-3.5 h-3.5"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"
+								/>
+							</svg>
+						</button>
+						{#if showUsageTooltip}
+							<div
+								class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50
+									bg-gray-900 dark:bg-gray-800 text-gray-100 dark:text-gray-100
+									rounded-lg shadow-lg px-2.5 py-1.5 text-[10px] font-mono
+									whitespace-nowrap pointer-events-none
+									min-w-[160px] border border-transparent dark:border-gray-700"
+							>
+								<div class="space-y-0.5">
+									{#each Object.entries(usage) as [key, value]}
+										<div class="flex justify-between gap-4">
+											<span class="text-gray-400 dark:text-gray-400">{formatUsageLabel(key)}</span>
+											<span class="tabular-nums text-white dark:text-gray-200"
+												>{formatUsageValue(key, value)}</span
+											>
+										</div>
+									{/each}
+								</div>
+								<!-- Arrow -->
+								<div
+									class="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0
+									border-l-[5px] border-l-transparent
+									border-r-[5px] border-r-transparent
+									border-t-[5px] border-t-gray-900 dark:border-t-gray-800"
+								></div>
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		{/if}
 	{/if}
 </div>
-
-

@@ -48,7 +48,7 @@
 			// Revert
 			conn.enabled = !newVal;
 			connections = [...connections];
-			toast.error('Failed to update connection');
+			toast.error($t('connections.failedToUpdate'));
 		}
 	}
 

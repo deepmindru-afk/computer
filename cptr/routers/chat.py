@@ -213,6 +213,8 @@ async def _fetch_provider_models(conn: dict) -> list[str]:
     """Discover models from a provider's /models endpoint."""
     import httpx
 
+    from cptr.utils.ai import _openrouter_headers
+
     secret = _get_jwt_secret()
     api_key = decrypt_key(conn.get("api_key", ""), secret) if conn.get("api_key") else None
     provider = conn.get("provider", "")
@@ -227,6 +229,7 @@ async def _fetch_provider_models(conn: dict) -> list[str]:
                     headers={
                         "x-api-key": api_key or "",
                         "anthropic-version": "2023-06-01",
+                        **_openrouter_headers(url),
                     },
                 )
                 if r.status_code == 200:
@@ -247,6 +250,7 @@ async def _fetch_provider_models(conn: dict) -> list[str]:
                     url,
                     headers={
                         "Authorization": f"Bearer {api_key or ''}",
+                        **_openrouter_headers(url),
                     },
                 )
                 if r.status_code == 200:

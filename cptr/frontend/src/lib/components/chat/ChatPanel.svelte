@@ -929,6 +929,7 @@
 								content={msg.content}
 								done={msg.done}
 								output={msg.output}
+								usage={msg.usage}
 								{chatId}
 								messageId={msg.id}
 								{siblingIndex}

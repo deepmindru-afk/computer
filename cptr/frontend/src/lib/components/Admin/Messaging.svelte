@@ -1,0 +1,149 @@
+<script lang="ts">
+	import { toast } from 'svelte-sonner';
+	import Icon from '../Icon.svelte';
+	import CreateBotModal from './CreateBotModal.svelte';
+	import { onMount } from 'svelte';
+	import { listBots, deleteBot, startBot, stopBot, type BotData } from '$lib/apis/bots';
+	import { t } from '$lib/i18n';
+	import Spinner from '$lib/components/common/Spinner.svelte';
+
+	let bots = $state<BotData[]>([]);
+	let loading = $state(true);
+
+	let showCreate = $state(false);
+	let editBot = $state<BotData | null>(null);
+
+	async function load() {
+		try {
+			bots = await listBots();
+		} catch {
+			toast.error('Failed to load bots');
+		} finally {
+			loading = false;
+		}
+	}
+
+	function handleSaved() {
+		showCreate = false;
+		editBot = null;
+		load();
+	}
+
+	async function toggleRunning(e: Event, bot: BotData) {
+		e.stopPropagation();
+		const wasRunning = bot.is_running;
+		// Optimistic
+		bot.is_running = !wasRunning;
+		bots = [...bots];
+		try {
+			if (wasRunning) {
+				await stopBot(bot.id);
+			} else {
+				await startBot(bot.id);
+			}
+			await load();
+		} catch {
+			bot.is_running = wasRunning;
+			bots = [...bots];
+			toast.error('Failed to toggle bot');
+		}
+	}
+
+	async function handleDelete(e: Event, bot: BotData) {
+		e.stopPropagation();
+		try {
+			await deleteBot(bot.id);
+			await load();
+		} catch {
+			toast.error('Failed to delete bot');
+		}
+	}
+
+	onMount(load);
+</script>
+
+<div class="flex items-center justify-between mb-4">
+	<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('admin.messaging')}</h2>
+	<button
+		class="flex items-center justify-center w-6 h-6 rounded-lg text-gray-400 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75"
+		onclick={() => (showCreate = true)}
+	>
+		<Icon name="plus" size={14} />
+	</button>
+</div>
+
+{#if loading}
+	<div class="flex justify-center py-8">
+		<Spinner size={16} />
+	</div>
+{:else}
+	<div>
+		{#each bots as bot}
+			<div class="group flex items-center gap-2 w-full h-7">
+				<!-- Platform icon -->
+				<span class="shrink-0
+					{bot.is_running ? 'text-gray-400 dark:text-gray-500' : 'text-gray-300 dark:text-gray-700'}">
+					<Icon name={bot.platform} size={14} />
+				</span>
+
+				<!-- Name (clickable to edit) -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<span
+					class="flex-1 text-[13px] truncate cursor-pointer
+					{bot.is_running ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-600'}"
+					onclick={() => (editBot = bot)}
+					onkeydown={() => {}}
+				>
+					{bot.name}
+				</span>
+
+				<!-- Delete (hover) -->
+				<button
+					type="button"
+					class="opacity-0 group-hover:opacity-100 text-gray-300 dark:text-gray-700 hover:text-red-500 dark:hover:text-red-400 transition-all p-0.5"
+					onclick={(e) => handleDelete(e, bot)}
+				>
+					<Icon name="trash" size={11} />
+				</button>
+
+				<!-- Toggle switch -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<span
+					class="relative w-6 h-3.5 rounded-full shrink-0 cursor-pointer transition-colors duration-150
+						{bot.is_running ? 'bg-gray-900 dark:bg-white' : 'bg-gray-200 dark:bg-gray-700'}"
+					role="switch"
+					tabindex="-1"
+					aria-checked={bot.is_running}
+					onclick={(e) => toggleRunning(e, bot)}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							toggleRunning(e, bot);
+						}
+					}}
+				>
+					<span
+						class="absolute top-0.5 w-2.5 h-2.5 rounded-full transition-all duration-150
+						{bot.is_running ? 'left-3 bg-white dark:bg-gray-900' : 'left-0.5 bg-white dark:bg-gray-500'}"
+					></span>
+				</span>
+			</div>
+		{/each}
+
+		{#if bots.length === 0}
+			<p class="text-[13px] text-gray-400 dark:text-gray-600 py-4">No messaging bots configured.</p>
+		{/if}
+	</div>
+{/if}
+
+{#if showCreate}
+	<CreateBotModal onclose={() => (showCreate = false)} onsave={handleSaved} />
+{/if}
+
+{#if editBot}
+	<CreateBotModal
+		bot={editBot}
+		onclose={() => (editBot = null)}
+		onsave={handleSaved}
+	/>
+{/if}

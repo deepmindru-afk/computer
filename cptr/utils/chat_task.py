@@ -944,20 +944,27 @@ async def run_chat_task(
                     )
 
                     if should_auto:
+                        # Show tool call in progress BEFORE execution
+                        item["status"] = "in_progress"
+                        output_items.append(item)
+                        if flushed_item:
+                            await emit(output=flushed_item)
+                        await emit(output=item)
+                        _sync_state()
+
                         if name == "create_artifact":
                             result = await create_artifact(**event["arguments"], workspace=workspace)
                         else:
                             result = await execute_tool(name, event["arguments"], {"workspace": workspace, "user_id": user_id, "model_id": model})
+
+                        # Update status to completed
                         item["status"] = "completed"
-                        output_items.append(item)
                         result_item = {
                             "type": "function_call_output",
                             "call_id": event["call_id"],
                             "output": result,
                         }
                         output_items.append(result_item)
-                        if flushed_item:
-                            await emit(output=flushed_item)
                         await emit(output=item)
                         await emit(output=result_item)
                         _sync_state()
@@ -1000,6 +1007,8 @@ async def run_chat_task(
                 elif event["type"] == "usage":
                     _flush_text()
                     usage = {k: v for k, v in event.items() if k != "type"}
+                    if "total_tokens" not in usage:
+                        usage["total_tokens"] = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
                     last_usage = usage
                     new_messages_since = 0
                     logger.info(

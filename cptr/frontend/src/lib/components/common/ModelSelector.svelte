@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { chatModels } from '$lib/stores/chat';
 	import DropdownMenu from '../DropdownMenu.svelte';
+	import { t } from '$lib/i18n';
 
 	interface Props {
 		selectedModel: string;
@@ -52,8 +53,8 @@
 >
 	<span class="truncate max-w-[160px]"
 		>{$chatModels.length === 0
-			? 'No models available'
-			: $chatModels.find((m) => m.id === selectedModel)?.name || 'Select model'}</span
+			? $t('modelSelector.noModels')
+			: $chatModels.find((m) => m.id === selectedModel)?.name || $t('modelSelector.selectModel')}</span
 	>
 	{#if $chatModels.length > 0}
 		<svg
@@ -96,7 +97,7 @@
 				<input
 					bind:this={searchInputEl}
 					bind:value={search}
-					placeholder="Search..."
+					placeholder={$t('modelSelector.search')}
 					class="w-full bg-transparent text-[11px] text-gray-500 dark:text-gray-400 placeholder:text-gray-300 dark:placeholder:text-gray-600 outline-none"
 					onkeydown={(e) => {
 						if (e.key === 'Escape') open = false;
@@ -105,7 +106,7 @@
 			</div>
 		{/snippet}
 		{#snippet empty()}
-			<div class="px-3 py-1.5 text-[11px] text-gray-400 dark:text-gray-500 text-center">No matches</div>
+			<div class="px-3 py-1.5 text-[11px] text-gray-400 dark:text-gray-500 text-center">{$t('modelSelector.noMatches')}</div>
 		{/snippet}
 	</DropdownMenu>
 {/if}

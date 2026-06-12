@@ -22,6 +22,7 @@
 		type AutomationRunData
 	} from '$lib/apis/automations';
 	import { toast } from 'svelte-sonner';
+	import { t } from '$lib/i18n';
 
 	interface Props {
 		automationId?: string;
@@ -50,7 +51,7 @@
 			items = res.items;
 			total = res.total;
 		} catch (e: any) {
-			toast.error(e.message || 'Failed to load automations');
+			toast.error(e.message || $t('automations.failedToLoad'));
 		} finally {
 			loading = false;
 		}
@@ -62,7 +63,7 @@
 			detail = await getAutomationById(id);
 			runs = await getAutomationRuns(id);
 		} catch (e: any) {
-			toast.error(e.message || 'Failed to load automation');
+			toast.error(e.message || $t('automations.failedToLoadOne'));
 		} finally {
 			detailLoading = false;
 		}
@@ -86,28 +87,28 @@
 			items = items.map((i) => (i.id === a.id ? updated : i));
 			if (detail?.id === a.id) detail = updated;
 		} catch (e: any) {
-			toast.error(e.message || 'Failed to toggle');
+			toast.error(e.message || $t('automations.failedToToggle'));
 		}
 	}
 
 	async function handleDelete(a: AutomationData) {
-		if (!confirm(`Delete "${a.name}"?`)) return;
+		if (!confirm($t('automations.deleteConfirm', { name: a.name }))) return;
 		try {
 			await deleteAutomation(a.id);
 			items = items.filter((i) => i.id !== a.id);
 			if (detail?.id === a.id) goto('/automations');
-			toast.success('Deleted');
+			toast.success($t('automations.deleted'));
 		} catch (e: any) {
-			toast.error(e.message || 'Failed to delete');
+			toast.error(e.message || $t('automations.failedToDelete'));
 		}
 	}
 
 	async function handleRunNow(a: AutomationData) {
 		try {
 			await runAutomation(a.id);
-			toast.success(`"${a.name}" triggered`);
+			toast.success($t('automations.triggered', { name: a.name }));
 		} catch (e: any) {
-			toast.error(e.message || 'Failed to run');
+			toast.error(e.message || $t('automations.failedToRun'));
 		}
 	}
 
@@ -153,9 +154,9 @@
 			const updated = await generateWebhook(detail.id);
 			detail = updated;
 			items = items.map((i) => (i.id === updated.id ? updated : i));
-			toast.success('Webhook enabled');
+			toast.success($t('automations.webhookEnabled'));
 		} catch (e: any) {
-			toast.error(e.message || 'Failed to generate webhook');
+			toast.error(e.message || $t('automations.failedToGenerateWebhook'));
 		} finally {
 			webhookLoading = false;
 		}
@@ -168,9 +169,9 @@
 			const updated = await deleteWebhook(detail.id);
 			detail = updated;
 			items = items.map((i) => (i.id === updated.id ? updated : i));
-			toast.success('Webhook disabled');
+			toast.success($t('automations.webhookDisabled'));
 		} catch (e: any) {
-			toast.error(e.message || 'Failed to revoke webhook');
+			toast.error(e.message || $t('automations.failedToRevokeWebhook'));
 		} finally {
 			webhookLoading = false;
 		}
@@ -198,7 +199,7 @@
 					<button
 						class="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors duration-100"
 						onclick={() => sidebarOpen.set(true)}
-						title="Toggle sidebar"
+						title={$t('automations.toggleSidebar')}
 					>
 						<Icon name="sidebar-expand" size={14} />
 					</button>
@@ -208,7 +209,7 @@
 					onclick={() => goto('/automations')}
 				>
 					<Icon name="chevron-left" size={12} />
-					<span>Automations</span>
+					<span>{$t('automations.title')}</span>
 				</button>
 				<span class="text-gray-300 dark:text-gray-600">/</span>
 				<span class="text-xs text-gray-900 dark:text-white truncate">{detail.name}</span>
@@ -218,21 +219,21 @@
 					<button
 						class="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75"
 						onclick={() => handleRunNow(detail!)}
-						title="Run now"
+						title={$t('automations.runNow')}
 					>
 						<Icon name="play" size={11} />
 					</button>
 					<button
 						class="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75"
 						onclick={() => { editingAutomation = detail; showModal = true; }}
-						title="Edit"
+						title={$t('automationModal.save')}
 					>
 						<Icon name="pencil" size={11} />
 					</button>
 					<button
 						class="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-red-500 transition-colors duration-75"
 						onclick={() => handleDelete(detail!)}
-						title="Delete"
+						title={$t('admin.delete')}
 					>
 						<Icon name="trash" size={11} />
 					</button>
@@ -244,30 +245,30 @@
 				<!-- Info rows -->
 				<div class="border-b border-gray-200 dark:border-white/6">
 					<div class="flex items-center h-7 px-3">
-						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">Status</span>
+						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">{$t('automations.status')}</span>
 						<div class="flex items-center gap-1.5">
 							<span class="w-1.5 h-1.5 rounded-full {detail.is_active ? 'bg-emerald-500' : 'bg-gray-400'}"></span>
-							<span class="text-xs text-gray-700 dark:text-gray-300">{detail.is_active ? 'Active' : 'Paused'}</span>
+							<span class="text-xs text-gray-700 dark:text-gray-300">{detail.is_active ? $t('automations.active') : $t('automations.paused')}</span>
 						</div>
 					</div>
 					<div class="flex items-center h-7 px-3">
-						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">Schedule</span>
+						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">{$t('automations.schedule')}</span>
 						<span class="text-xs text-gray-700 dark:text-gray-300">{parseFrequency(detail.rrule)}</span>
 					</div>
 					<div class="flex items-center h-7 px-3">
-						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">Model</span>
+						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">{$t('automations.model')}</span>
 						<span class="text-[11px] text-gray-500 dark:text-gray-400 font-mono">{detail.model_id}</span>
 					</div>
 					<div class="flex items-center h-7 px-3">
-						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">Next run</span>
+						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">{$t('automations.nextRun')}</span>
 						<span class="text-xs text-gray-700 dark:text-gray-300">{formatTime(detail.next_run_at)}</span>
 					</div>
 					<div class="flex items-center h-7 px-3">
-						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">Last run</span>
+						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">{$t('automations.lastRun')}</span>
 						<span class="text-xs text-gray-700 dark:text-gray-300">{formatTime(detail.last_run_at)}</span>
 					</div>
 					<div class="flex items-center min-h-[1.75rem] px-3">
-						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">Webhook</span>
+						<span class="text-[11px] text-gray-400 dark:text-gray-500 w-20 shrink-0">{$t('automations.webhook')}</span>
 						{#if detail.webhook_url}
 							<div class="flex items-center gap-1.5 min-w-0 flex-1">
 								<span class="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">...?token={detail.webhook_url.split('token=')[1]?.slice(0, 12)}...</span>
@@ -275,20 +276,20 @@
 									class="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75 shrink-0"
 									onclick={copyWebhookUrl}
 								>
-									{webhookCopied ? 'Copied!' : 'Copy'}
+									{webhookCopied ? $t('automations.copied') : $t('automations.copy')}
 								</button>
 							</div>
 						{:else if detail.has_webhook}
 							<!-- Webhook enabled, URL not available -->
 							<div class="flex items-center gap-1.5">
-								<span class="text-[11px] text-gray-700 dark:text-gray-300">Enabled</span>
+								<span class="text-[11px] text-gray-700 dark:text-gray-300">{$t('automations.enabled')}</span>
 								<span class="text-gray-300 dark:text-gray-600">·</span>
 								<button
 									class="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75"
 									onclick={handleGenerateWebhook}
 									disabled={webhookLoading}
 								>
-									Regenerate
+									{$t('automations.regenerate')}
 								</button>
 								<span class="text-gray-300 dark:text-gray-600">·</span>
 								<button
@@ -296,7 +297,7 @@
 									onclick={handleRevokeWebhook}
 									disabled={webhookLoading}
 								>
-									Disable
+									{$t('automations.disable')}
 								</button>
 							</div>
 						{:else}
@@ -305,7 +306,7 @@
 								onclick={handleGenerateWebhook}
 								disabled={webhookLoading}
 							>
-								Enable
+								{$t('automations.enable')}
 							</button>
 						{/if}
 					</div>
@@ -313,7 +314,7 @@
 
 				<!-- Prompt -->
 				<div class="border-b border-gray-200 dark:border-white/6 px-3 py-2">
-					<div class="text-[11px] text-gray-400 dark:text-gray-500 mb-1">Prompt</div>
+					<div class="text-[11px] text-gray-400 dark:text-gray-500 mb-1">{$t('automations.prompt')}</div>
 					<div class="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap font-mono leading-relaxed max-h-32 overflow-y-auto">
 						{detail.prompt}
 					</div>
@@ -321,9 +322,9 @@
 
 				<!-- Runs -->
 				<div class="px-3 py-2">
-					<div class="text-[11px] text-gray-400 dark:text-gray-500 mb-1">Runs</div>
+					<div class="text-[11px] text-gray-400 dark:text-gray-500 mb-1">{$t('automations.runs')}</div>
 					{#if runs.length === 0}
-						<div class="text-[11px] text-gray-400 dark:text-gray-600 py-2">No runs yet</div>
+						<div class="text-[11px] text-gray-400 dark:text-gray-600 py-2">{$t('automations.noRuns')}</div>
 					{:else}
 						{#each runs as run}
 							<div class="flex items-center gap-2 h-7 text-xs">
@@ -340,7 +341,7 @@
 											setTimeout(() => openChatTab(run.chat_id!), 300);
 										}}
 									>
-										view chat →
+										{$t('automations.viewChat')}
 									</button>
 								{/if}
 								{#if run.error}
@@ -360,12 +361,12 @@
 				<button
 					class="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors duration-100"
 					onclick={() => sidebarOpen.set(true)}
-					title="Toggle sidebar"
+					title={$t('automations.toggleSidebar')}
 				>
 					<Icon name="sidebar-expand" size={14} />
 				</button>
 			{/if}
-			<span class="text-xs text-gray-900 dark:text-white">Automations</span>
+			<span class="text-xs text-gray-900 dark:text-white">{$t('automations.title')}</span>
 			{#if total > 0}
 				<span class="text-[11px] text-gray-400 dark:text-gray-600">{total}</span>
 			{/if}
@@ -376,14 +377,14 @@
 					bind:value={statusFilter}
 					onchange={loadList}
 				>
-					<option value="all">All</option>
-					<option value="active">Active</option>
-					<option value="paused">Paused</option>
+					<option value="all">{$t('automations.all')}</option>
+					<option value="active">{$t('automations.active')}</option>
+					<option value="paused">{$t('automations.paused')}</option>
 				</select>
 				<button
 					class="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75"
 					onclick={() => { editingAutomation = null; showModal = true; }}
-					title="New automation"
+					title={$t('automations.newAutomation')}
 				>
 					<Icon name="plus" size={13} />
 				</button>
@@ -396,7 +397,7 @@
 			<input
 				type="text"
 				class="flex-1 border-none outline-none bg-transparent text-xs text-gray-900 dark:text-white placeholder:text-gray-400"
-				placeholder="Filter..."
+				placeholder={$t('automations.filter')}
 				bind:value={searchQuery}
 				oninput={loadList}
 			/>
@@ -416,14 +417,14 @@
 			{:else if items.length === 0}
 				<div class="flex flex-col items-center justify-center py-12 gap-2">
 					<p class="text-xs text-gray-400 dark:text-gray-600">
-						{searchQuery ? 'No matches' : 'No automations yet'}
+						{searchQuery ? $t('automations.noMatches') : $t('automations.noAutomations')}
 					</p>
 					{#if !searchQuery}
 						<button
 							class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1 rounded-lg bg-gray-100 dark:bg-white/6 transition-colors duration-75"
 							onclick={() => { editingAutomation = null; showModal = true; }}
 						>
-							Create automation
+							{$t('automations.create')}
 						</button>
 					{/if}
 				</div>
@@ -448,7 +449,7 @@
 							<button
 								class="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-75"
 								onclick={() => handleRunNow(a)}
-								title="Run now"
+								title={$t('automations.runNow')}
 							>
 								<Icon name="play" size={11} />
 							</button>

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-12
+
+### Added
+
+- 💬 **Messaging bots.** Connect your AI to Telegram, Discord, Slack, WhatsApp, and Signal from Settings. Each bot has full tool access, streams responses in real time, and syncs conversations back to the web UI. Use `/workspace` to switch projects and `/new` to start fresh conversations.
+- 📊 **Usage tooltip.** Hover the info icon on completed messages to see token counts and timing.
+
+### Changed
+
+- 🔄 **Live tool progress.** See what tools are running as they execute, not just after they finish.
+- 🌍 **i18n updates.** Full translation coverage across all 10 locales.
+
+### Fixed
+
+- 🐛 **Empty model selector.** Shows a helpful label when no models are configured.
+
 ## [0.2.3] - 2026-06-12
 
 ### Added

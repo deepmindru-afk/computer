@@ -32,9 +32,9 @@
 				method: 'PUT',
 				body: JSON.stringify({ config: { 'notifications.webhook_url': webhookUrl.trim() || null } })
 			});
-			toast.success('Webhook URL saved');
+			toast.success($t('general.webhookUrlSaved'));
 		} catch {
-			toast.error('Failed to save webhook URL');
+			toast.error($t('general.webhookUrlSaveFailed'));
 		} finally {
 			webhookLoading = false;
 		}
@@ -48,7 +48,7 @@
 				if (permission === 'granted') {
 					notificationsEnabled.set(true);
 				} else {
-					toast.error('Browser notification permission denied');
+					toast.error($t('general.notificationPermissionDenied'));
 				}
 			}
 		} else {
@@ -88,28 +88,28 @@
 	</select>
 
 	<!-- Notifications -->
-	<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">Notifications</h3>
+	<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('general.notifications')}</h3>
 
 	<div class="flex flex-col gap-2.5">
 		<!-- Browser notifications toggle -->
 		<label class="flex items-center justify-between cursor-pointer">
-			<span class="text-xs text-gray-600 dark:text-gray-400">Browser notifications</span>
+			<span class="text-xs text-gray-600 dark:text-gray-400">{$t('general.browserNotifications')}</span>
 			<ToggleSwitch value={$notificationsEnabled} onchange={() => toggleNotifications()} />
 		</label>
 		<p class="text-[11px] text-gray-400 dark:text-gray-600 -mt-1">
-			Show OS-level notifications when a task completes and the tab is not focused.
+			{$t('general.browserNotificationsDesc')}
 		</p>
 
 		<!-- Sound toggle -->
 		<label class="flex items-center justify-between cursor-pointer">
-			<span class="text-xs text-gray-600 dark:text-gray-400">Notification sound</span>
+			<span class="text-xs text-gray-600 dark:text-gray-400">{$t('general.notificationSound')}</span>
 			<ToggleSwitch value={$notificationSound} onchange={(v) => notificationSound.set(v)} />
 		</label>
 
 		<!-- Webhook URL -->
 		<div class="mt-1">
 			<label class="text-xs text-gray-600 dark:text-gray-400" for="webhook-url">
-				Webhook URL
+				{$t('general.webhookUrl')}
 			</label>
 			<div class="flex gap-1.5 mt-1">
 				<input
@@ -124,29 +124,29 @@
 					onclick={saveWebhookUrl}
 					disabled={webhookLoading}
 				>
-					Save
+					{$t('settings.save')}
 				</button>
 			</div>
 			<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-1">
-				Supports Slack, Discord, Teams, and generic JSON webhooks.
+				{$t('general.webhookUrlHint')}
 			</p>
 		</div>
 	</div>
 
 	{#if $session?.role === 'admin'}
-		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">Updates</h3>
+		<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('general.updates')}</h3>
 		<label class="flex items-center justify-between cursor-pointer">
-			<span class="text-xs text-gray-600 dark:text-gray-400">Update notifications</span>
+			<span class="text-xs text-gray-600 dark:text-gray-400">{$t('general.updateNotifications')}</span>
 			<ToggleSwitch value={$showUpdateToastPref} onchange={(v) => showUpdateToastPref.set(v)} />
 		</label>
 		<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-1">
-			Show a toast when a new version of cptr is available.
+			{$t('general.updateNotificationsDesc')}
 		</p>
 	{/if}
 
-	<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">Message queue</h3>
+	<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('general.messageQueue')}</h3>
 	<div class="flex gap-1">
-		{#each [{ value: 'queue' as StreamingBehavior, label: 'Queue' }, { value: 'interrupt' as StreamingBehavior, label: 'Interrupt' }] as opt}
+		{#each [{ value: 'queue' as StreamingBehavior, label: $t('general.queue') }, { value: 'interrupt' as StreamingBehavior, label: $t('general.interrupt') }] as opt}
 			<button
 				class="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs transition-colors duration-100
 				{$streamingBehavior === opt.value
@@ -160,8 +160,8 @@
 	</div>
 	<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-1">
 		{$streamingBehavior === 'queue'
-			? 'Messages sent during generation are queued and sent after completion.'
-			: 'Sending a message cancels the current generation.'}
+			? $t('general.queueDesc')
+			: $t('general.interruptDesc')}
 	</p>
 
 	<div class="mt-auto pt-6 flex justify-end">

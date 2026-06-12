@@ -4,6 +4,7 @@
 	import Icon from './Icon.svelte';
 	import { appVersion, lastSeenVersion, showChangelog } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import { t } from '$lib/i18n';
 
 	type ChangelogEntry = { title: string; content: string; raw: string };
 	type VersionData = { date: string; [section: string]: string | ChangelogEntry[] };
@@ -61,10 +62,10 @@
 	<Modal onclose={handleClose} class="w-full max-w-3xl mx-4 md:mx-0 flex flex-col max-h-[52vh]">
 		<div class="flex items-center gap-3 px-4 pt-4 pb-2 shrink-0">
 			<div class="min-w-0 flex-1">
-				<h2 class="text-sm font-medium text-gray-900 dark:text-white">What's New</h2>
+				<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('changelog.whatsNew')}</h2>
 				{#if $appVersion}
 					<p class="mt-0.5 text-[11px] text-gray-400 dark:text-gray-600">
-						Release Notes
+						{$t('changelog.releaseNotes')}
 					</p>
 				{/if}
 			</div>
@@ -138,18 +139,18 @@
 				</div>
 			{:else if error}
 				<div class="flex flex-col items-center justify-center py-16 gap-2 text-center">
-					<p class="text-xs text-gray-500 dark:text-gray-400">Couldn't load release notes.</p>
+					<p class="text-xs text-gray-500 dark:text-gray-400">{$t('changelog.loadError')}</p>
 					<button
 						class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 dark:bg-white/6 dark:text-gray-400 dark:hover:text-white transition-colors duration-75"
 						onclick={() => (error = false)}
 					>
-						Retry
+						{$t('changelog.retry')}
 					</button>
 				</div>
 			{:else}
 				<div class="flex flex-col items-center justify-center py-16 gap-3">
 					<Spinner size={16} />
-					<span class="text-[11px] text-gray-400 dark:text-gray-600">Loading release notes...</span>
+					<span class="text-[11px] text-gray-400 dark:text-gray-600">{$t('changelog.loading')}</span>
 				</div>
 			{/if}
 		</div>
@@ -159,7 +160,7 @@
 				class="text-[13px] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100"
 				onclick={handleClose}
 			>
-				Done
+				{$t('changelog.done')}
 			</button>
 		</div>
 	</Modal>

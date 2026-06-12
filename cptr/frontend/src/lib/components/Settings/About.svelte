@@ -29,7 +29,7 @@
 				target="_blank"
 				rel="noopener noreferrer"
 				class="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-				>v{$latestVersion} available</a
+				>{$t('about.updateAvailable', { version: $latestVersion })}</a
 			>
 		{/if}
 	</div>
@@ -44,11 +44,11 @@
 			href="https://github.com/open-webui/computer/blob/main/LICENSE"
 			target="_blank"
 			rel="noopener noreferrer"
-			class="underline hover:text-gray-700 dark:hover:text-gray-300">Open Use License</a
+			class="underline hover:text-gray-700 dark:hover:text-gray-300">{$t('about.licenseName')}</a
 		>
 
 		<br />
-		Copyright © 2026 Open WebUI Inc. All rights reserved.
+		{$t('about.copyright')}
 	</p>
 </div>
 

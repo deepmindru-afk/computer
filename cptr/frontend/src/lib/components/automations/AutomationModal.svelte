@@ -12,6 +12,7 @@
 	import type { AutomationData, AutomationForm } from '$lib/apis/automations';
 	import { createAutomation, updateAutomation } from '$lib/apis/automations';
 	import { toast } from 'svelte-sonner';
+	import { t } from '$lib/i18n';
 
 	interface Props {
 		automation?: AutomationData | null;
@@ -49,7 +50,7 @@
 	);
 
 	let selectedWsName = $derived(
-		$workspaceList.find((w) => w.path === workspace)?.name || workspace.split('/').pop() || 'Select workspace'
+		$workspaceList.find((w) => w.path === workspace)?.name || workspace.split('/').pop() || $t('automationModal.selectWorkspace')
 	);
 
 	async function handleSubmit() {
@@ -75,7 +76,7 @@
 			onsave(result);
 			onclose();
 		} catch (e: any) {
-			toast.error(e.message || 'Failed to save automation');
+			toast.error(e.message || $t('automationModal.failedToSave'));
 		} finally {
 			saving = false;
 		}
@@ -90,7 +91,7 @@
 				class="w-full text-lg bg-transparent outline-none placeholder:text-gray-300 dark:placeholder:text-gray-700 text-gray-900 dark:text-white"
 				type="text"
 				bind:value={name}
-				placeholder="Automation title"
+				placeholder={$t('automationModal.titlePlaceholder')}
 			/>
 			<button
 				class="shrink-0 ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
@@ -102,13 +103,13 @@
 
 		<!-- Prompt -->
 		<div class="px-5 pb-2">
-			<div class="mb-1 text-[11px] text-gray-400 dark:text-gray-500">Instructions</div>
+			<div class="mb-1 text-[11px] text-gray-400 dark:text-gray-500">{$t('automationModal.instructions')}</div>
 			<textarea
 				class="w-full text-xs bg-transparent outline-none placeholder:text-gray-300 dark:placeholder:text-gray-700 text-gray-700 dark:text-gray-300 resize-none"
 				bind:value={prompt}
 				rows={8}
 				style="min-height: 12rem;"
-				placeholder="Enter prompt here..."
+				placeholder={$t('automationModal.promptPlaceholder')}
 			></textarea>
 		</div>
 
@@ -142,7 +143,7 @@
 					type="button"
 					onclick={onclose}
 				>
-					Cancel
+					{$t('automationModal.cancel')}
 				</button>
 				<button
 					class="px-3.5 py-1.5 text-xs bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-colors rounded-full disabled:opacity-50"
@@ -150,7 +151,7 @@
 					onclick={handleSubmit}
 					disabled={saving || !name.trim() || !prompt.trim() || !modelId || !workspace}
 				>
-					{saving ? 'Saving...' : automation ? 'Save' : 'Create'}
+					{saving ? $t('automationModal.saving') : automation ? $t('automationModal.save') : $t('automationModal.createBtn')}
 				</button>
 			</div>
 		</div>
