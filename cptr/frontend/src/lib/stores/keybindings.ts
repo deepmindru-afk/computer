@@ -38,7 +38,8 @@ export const ACTION_IDS = [
 	'searchAll',
 	'openSettings',
 	'toggleSplit',
-	'toggleSidebar'
+	'toggleSidebar',
+	'voiceMemo'
 ] as const;
 
 export type ActionId = (typeof ACTION_IDS)[number];
@@ -56,7 +57,8 @@ export const ACTION_LABELS: Record<ActionId, string> = {
 	searchAll: 'Search',
 	openSettings: 'Open Settings',
 	toggleSplit: 'Toggle Split',
-	toggleSidebar: 'Toggle Sidebar'
+	toggleSidebar: 'Toggle Sidebar',
+	voiceMemo: 'Voice Memo'
 };
 
 // ── Default bindings (browser-safe) ─────────────────────────────
@@ -72,7 +74,8 @@ export const DEFAULT_KEYBINDINGS: Record<ActionId, string> = {
 	searchAll: 'Cmd+Shift+F',
 	openSettings: 'Cmd+.',
 	toggleSplit: 'Cmd+\\',
-	toggleSidebar: 'Cmd+Shift+S'
+	toggleSidebar: 'Cmd+Shift+S',
+	voiceMemo: 'Cmd+Shift+M'
 };
 
 // ── Store ───────────────────────────────────────────────────────
@@ -235,6 +238,7 @@ export function executeAction(
 		toggleQuickOpen?: () => void;
 		toggleSettings?: () => void;
 		toggleSearch?: () => void;
+		toggleVoiceMemo?: () => void;
 	}
 ): boolean {
 	switch (action) {
@@ -299,6 +303,10 @@ export function executeAction(
 
 		case 'toggleSidebar':
 			sidebarOpen.update((v) => !v);
+			return true;
+
+		case 'voiceMemo':
+			callbacks?.toggleVoiceMemo?.();
 			return true;
 
 		default:

@@ -10,6 +10,7 @@
 	import Connections from './Admin/Connections.svelte';
 	import Models from './Admin/Models.svelte';
 	import Messaging from './Admin/Messaging.svelte';
+	import AudioSettings from './Admin/AudioSettings.svelte';
 	import AdminSettings from './Admin/Settings.svelte';
 	import { session } from '$lib/session';
 	import { t } from '$lib/i18n';
@@ -24,6 +25,7 @@
 		| 'connections'
 		| 'models'
 		| 'messaging'
+		| 'audio'
 		| 'admin_settings';
 
 	interface Props {
@@ -49,6 +51,7 @@
 		{ id: 'connections', label: $t('admin.connections'), icon: 'plug' },
 		{ id: 'models', label: $t('admin.models'), icon: 'cube' },
 		{ id: 'messaging', label: $t('admin.messaging'), icon: 'chat-bubble' },
+		{ id: 'audio', label: 'Audio', icon: 'microphone' },
 		{ id: 'browser', label: 'Browser', icon: 'browser' },
 		{ id: 'admin_settings', label: $t('settings.configuration'), icon: 'shield' }
 	]);
@@ -123,6 +126,8 @@
 			<Models />
 		{:else if activeTab === 'messaging'}
 			<Messaging />
+		{:else if activeTab === 'audio'}
+			<AudioSettings />
 		{:else if activeTab === 'admin_settings'}
 			<AdminSettings />
 		{/if}

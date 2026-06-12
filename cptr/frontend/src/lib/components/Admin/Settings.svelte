@@ -127,12 +127,12 @@
 				<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-2">{$t('admin.webAutoHint')}</p>
 			{:else if provider === 'exa'}
 				<div class="mt-3">
-					<label class="block text-[13px] text-gray-700 dark:text-gray-300 mb-1"
+					<label class="text-xs text-gray-600 dark:text-gray-400 mb-1"
 						>{$t('admin.webExaKey')}</label
 					>
 					<input
 						type="password"
-						class="w-full text-[13px] bg-gray-50 dark:bg-white/4 border border-gray-200 dark:border-white/8 rounded-lg px-2.5 py-1.5 outline-none text-gray-700 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+						class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors"
 						placeholder="exa-..."
 						bind:value={exaKey}
 						onblur={() => saveKey('web.exa_api_key', exaKey)}
@@ -144,12 +144,12 @@
 				</div>
 			{:else if provider === 'tavily'}
 				<div class="mt-3">
-					<label class="block text-[13px] text-gray-700 dark:text-gray-300 mb-1"
+					<label class="text-xs text-gray-600 dark:text-gray-400 mb-1"
 						>{$t('admin.webTavilyKey')}</label
 					>
 					<input
 						type="password"
-						class="w-full text-[13px] bg-gray-50 dark:bg-white/4 border border-gray-200 dark:border-white/8 rounded-lg px-2.5 py-1.5 outline-none text-gray-700 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+						class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors"
 						placeholder="tvly-..."
 						bind:value={tavilyKey}
 						onblur={() => saveKey('web.tavily_api_key', tavilyKey)}
@@ -161,12 +161,12 @@
 				</div>
 			{:else if provider === 'brave'}
 				<div class="mt-3">
-					<label class="block text-[13px] text-gray-700 dark:text-gray-300 mb-1"
+					<label class="text-xs text-gray-600 dark:text-gray-400 mb-1"
 						>{$t('admin.webBraveKey')}</label
 					>
 					<input
 						type="password"
-						class="w-full text-[13px] bg-gray-50 dark:bg-white/4 border border-gray-200 dark:border-white/8 rounded-lg px-2.5 py-1.5 outline-none text-gray-700 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+						class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors"
 						placeholder="BSA..."
 						bind:value={braveKey}
 						onblur={() => saveKey('web.brave_api_key', braveKey)}
@@ -182,12 +182,12 @@
 				</p>
 			{:else if provider === 'perplexity'}
 				<div class="mt-3">
-					<label class="block text-[13px] text-gray-700 dark:text-gray-300 mb-1"
+					<label class="text-xs text-gray-600 dark:text-gray-400 mb-1"
 						>{$t('admin.webPerplexityKey')}</label
 					>
 					<input
 						type="password"
-						class="w-full text-[13px] bg-gray-50 dark:bg-white/4 border border-gray-200 dark:border-white/8 rounded-lg px-2.5 py-1.5 outline-none text-gray-700 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+						class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors"
 						placeholder="pplx-..."
 						bind:value={perplexityKey}
 						onblur={() => saveKey('web.perplexity_api_key', perplexityKey)}
@@ -200,12 +200,12 @@
 			{:else if provider === 'chat_completions'}
 				<div class="mt-3 space-y-3">
 					<div>
-						<label class="block text-[13px] text-gray-700 dark:text-gray-300 mb-1"
+						<label class="text-xs text-gray-600 dark:text-gray-400 mb-1"
 							>{$t('admin.webCcBaseUrl')}</label
 						>
 						<input
 							type="text"
-							class="w-full text-[13px] bg-gray-50 dark:bg-white/4 border border-gray-200 dark:border-white/8 rounded-lg px-2.5 py-1.5 outline-none text-gray-700 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+							class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors"
 							placeholder="https://api.perplexity.ai/v1"
 							bind:value={ccBaseUrl}
 							onblur={() => saveKey('web.chat_completions_base_url', ccBaseUrl)}
@@ -213,12 +213,12 @@
 						/>
 					</div>
 					<div>
-						<label class="block text-[13px] text-gray-700 dark:text-gray-300 mb-1"
+						<label class="text-xs text-gray-600 dark:text-gray-400 mb-1"
 							>{$t('admin.webCcKey')}</label
 						>
 						<input
 							type="password"
-							class="w-full text-[13px] bg-gray-50 dark:bg-white/4 border border-gray-200 dark:border-white/8 rounded-lg px-2.5 py-1.5 outline-none text-gray-700 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+							class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors"
 							placeholder="sk-..."
 							bind:value={ccKey}
 							onblur={() => saveKey('web.chat_completions_api_key', ccKey)}
@@ -226,12 +226,12 @@
 						/>
 					</div>
 					<div>
-						<label class="block text-[13px] text-gray-700 dark:text-gray-300 mb-1"
+						<label class="text-xs text-gray-600 dark:text-gray-400 mb-1"
 							>{$t('admin.webCcModel')}</label
 						>
 						<input
 							type="text"
-							class="w-full text-[13px] bg-gray-50 dark:bg-white/4 border border-gray-200 dark:border-white/8 rounded-lg px-2.5 py-1.5 outline-none text-gray-700 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+							class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors"
 							placeholder="sonar-pro"
 							bind:value={ccModel}
 							onblur={() => saveKey('web.chat_completions_model', ccModel)}

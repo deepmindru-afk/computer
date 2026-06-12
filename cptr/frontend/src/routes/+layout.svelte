@@ -42,6 +42,7 @@
 	import { gitStatusStore } from '$lib/stores/gitStatus.svelte';
 	import { t } from '$lib/i18n';
 	import { refreshChatState, bindGlobalChatListener } from '$lib/stores/chat';
+	import { refreshAudioState } from '$lib/stores/audio';
 
 	let { children } = $props();
 	let showSettings = $state(false);
@@ -147,6 +148,7 @@
 				authState = 'authenticated';
 				initState();
 				refreshChatState();
+				refreshAudioState();
 
 				// Check for version updates (admin only, after session is set)
 				checkForUpdates();
@@ -160,6 +162,7 @@
 			authState = 'authenticated';
 			initState();
 			refreshChatState();
+			refreshAudioState();
 		}
 	}
 
@@ -177,6 +180,7 @@
 				authState = 'authenticated';
 				initState();
 				refreshChatState();
+				refreshAudioState();
 				return;
 			}
 		} catch {}
@@ -220,6 +224,13 @@
 			},
 			toggleSearch: () => {
 				showSearch.update((v) => !v);
+			},
+			toggleVoiceMemo: () => {
+				import('$lib/stores/audio').then(({ voiceMemosEnabled, showVoiceMemo }) => {
+					import('svelte/store').then(({ get }) => {
+						if (get(voiceMemosEnabled)) showVoiceMemo.update((v) => !v);
+					});
+				});
 			}
 		});
 	}

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-06-12
+
+### Added
+
+- 🎙️ **Voice memos.** Record audio memos directly from the "+" menu or ⌘⇧M. Recordings are saved to your workspace as audio files with an auto-generated markdown transcript. Uses a save-first architecture with IndexedDB backup so your recording is never lost, even if the network drops. Transcription is powered by any OpenAI-compatible STT API (Whisper, etc.), configurable in Settings > Audio.
+- 🔊 **Audio admin settings.** New Audio tab in admin settings with separate controls for enabling voice memos, toggling auto-transcription, and configuring STT credentials (base URL, API key, model).
+
+### Changed
+
+- 🎨 **Consistent admin input styling.** Standardized all input fields in the Configuration admin panel to match the Browser settings design. Uniform height, background, focus states, and label sizing across all admin tabs.
+
 ## [0.3.1] - 2026-06-12
 
 ### Added
