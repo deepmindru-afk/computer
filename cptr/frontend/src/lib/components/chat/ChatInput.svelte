@@ -401,7 +401,7 @@
 		if (!child) return;
 		const popupHeight = child.offsetHeight || 200;
 		child.style.position = 'fixed';
-		child.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 340))}px`;
+		child.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 280))}px`;
 		child.style.top = `${rect.top - popupHeight - 8}px`;
 	}
 
