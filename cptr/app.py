@@ -15,6 +15,7 @@ from cptr.routers import (
     chat_router,
     events_router,
     files_router,
+    gateway_router,
     git_router,
     proxy_router,
     search_router,
@@ -94,7 +95,7 @@ async def auth_middleware(request: Request, call_next):
         or path == "/manifest.json"
     ):
         return await call_next(request)
-    if path.startswith("/_app/") or not path.startswith("/api/"):
+    if path.startswith("/_app/") or path.startswith("/v1/") or not path.startswith("/api/"):
         return await call_next(request)
     # GET /api/files/{id} is public (UUID is unguessable, <img src> can't send cookies)
     if request.method == "GET" and path.startswith("/api/files/"):
@@ -218,6 +219,7 @@ app.include_router(webhook_router)
 app.include_router(chat_router)
 app.include_router(events_router)
 app.include_router(files_router)
+app.include_router(gateway_router)
 app.include_router(git_router)
 app.include_router(proxy_router)
 app.include_router(search_router)

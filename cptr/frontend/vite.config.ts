@@ -11,6 +11,10 @@ export default defineConfig({
 				changeOrigin: true,
 				ws: true
 			},
+			'/v1': {
+				target: 'http://localhost:9741',
+				changeOrigin: true
+			},
 			'/socket.io': {
 				target: 'http://localhost:9741',
 				changeOrigin: true,

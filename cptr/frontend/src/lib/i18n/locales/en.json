@@ -410,6 +410,22 @@
 
 	"connections.failedToUpdate": "Failed to update connection",
 
+	"admin.gateway.tab": "Gateway",
+	"admin.gateway.title": "API Gateway",
+	"admin.gateway.description": "Generate API keys to connect Open-WebUI or any OpenAI-compatible client to your workspaces.",
+	"admin.gateway.loadError": "Failed to load API keys",
+	"admin.gateway.createKey": "Create key",
+	"admin.gateway.keyNamePlaceholder": "Key name (e.g. open-webui)",
+	"admin.gateway.keyCreated": "API key created",
+	"admin.gateway.createError": "Failed to create key",
+	"admin.gateway.keyDeleted": "API key deleted",
+	"admin.gateway.deleteError": "Failed to delete key",
+	"admin.gateway.copied": "Copied to clipboard",
+	"admin.gateway.noKeys": "No API keys yet",
+	"admin.gateway.newKey": "New API key created. Copy it now",
+	"admin.gateway.keyWarning": "This key will only be shown once. Store it securely.",
+	"admin.gateway.howToConnect": "Connect from Open-WebUI",
+
 	"admin.messaging": "Messaging",
 
 	"messaging.loadError": "Failed to load bots",

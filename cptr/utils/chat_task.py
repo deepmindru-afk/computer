@@ -53,11 +53,13 @@ def start_task(
     workspace: str,
     model: str,
     regeneration_prompt: str | None = None,
+    output_queue: asyncio.Queue | None = None,
 ):
     """Launch the agentic loop as a background asyncio.Task."""
     task = asyncio.create_task(
         run_chat_task(
-            message_id, chat_id, user_id, connection, workspace, model, regeneration_prompt
+            message_id, chat_id, user_id, connection, workspace, model,
+            regeneration_prompt, output_queue,
         )
     )
     _tasks[message_id] = task
@@ -776,12 +778,22 @@ async def run_chat_task(
     workspace: str,
     model: str,
     regeneration_prompt: str | None = None,
+    output_queue: asyncio.Queue | None = None,
 ):
     """Plain async function. Makes raw API calls in a loop."""
 
     async def emit(**data):
         """Stream an output delta to the user."""
         await emit_to_user(user_id, {"chat_id": chat_id, "message_id": message_id, **data})
+        # Push to gateway queue if present
+        if output_queue is not None:
+            if "delta" in data:
+                await output_queue.put({"type": "delta", "content": data["delta"]})
+            elif data.get("done"):
+                if "error" in data:
+                    await output_queue.put({"type": "error", "message": data["error"]})
+                else:
+                    await output_queue.put({"type": "done", "finish_reason": "stop"})
 
     async def _emit_done():
         """Emit done=True enriched with chat title and content preview."""
