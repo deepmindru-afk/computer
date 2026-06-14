@@ -572,7 +572,7 @@ class BotManager:
         if not adapter:
             return
 
-        max_len = 4096 if bot["platform"] == "telegram" else 2000
+        max_len = 32_768 if bot["platform"] == "telegram" else 2000
         last_sent = ""
         is_telegram = bot["platform"] == "telegram"
 

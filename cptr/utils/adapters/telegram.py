@@ -1,10 +1,15 @@
 """Telegram adapter — zero SDK dependencies.
 
 Uses raw httpx calls to the Telegram Bot API:
-- ``sendMessageDraft`` for native streaming (Bot API 9.5+)
-- ``editMessageText`` as fallback for older clients
+- ``sendRichMessageDraft`` for native rich streaming (Bot API 10.1+)
+- ``sendRichMessage`` to persist the final response
+- ``editMessageText`` with rich_message for edit-based fallback
 - ``getUpdates`` long-polling for inbound messages
 - ``sendChatAction(typing)`` for typing indicators
+
+Rich messages use InputRichMessage which is just {markdown: str} — Telegram
+parses the markdown server-side into headings, tables, code blocks, math, etc.
+Since AI responses are already markdown, we pass them straight through.
 """
 
 from __future__ import annotations
@@ -21,13 +26,16 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.telegram.org/bot{token}"
 POLL_TIMEOUT = 30  # seconds (Telegram long-poll)
-MAX_MESSAGE_LEN = 4096
+MAX_MESSAGE_LEN = 32_768  # Rich message limit
+PLAIN_MESSAGE_LEN = 4096  # Plain message limit
 RECONNECT_BASE_DELAY = 2.0
 RECONNECT_MAX_DELAY = 60.0
 
 
+
+
 class TelegramAdapter(BaseAdapter):
-    """Telegram bot via raw HTTP — getUpdates long-polling + native streaming."""
+    """Telegram bot via raw HTTP — getUpdates long-polling + rich streaming."""
 
     platform = "telegram"
 
@@ -40,7 +48,7 @@ class TelegramAdapter(BaseAdapter):
         self._poll_task: Optional[asyncio.Task] = None
         self._running = False
         self._bot_info: dict = {}
-        self._supports_draft: bool = True  # Assume 9.5+, fallback on error
+        self._supports_draft: bool = True
 
     # ── Lifecycle ──────────────────────────────────────────
 
@@ -79,8 +87,21 @@ class TelegramAdapter(BaseAdapter):
     # ── Sending ────────────────────────────────────────────
 
     async def send(self, chat_id: str, text: str) -> str | None:
-        """Send a message. Returns the message ID for later editing."""
-        chunks = chunk_message(text, MAX_MESSAGE_LEN)
+        """Send a message. Tries rich, falls back to plain."""
+        if text and text.strip():
+            try:
+                result = await self._api(
+                    "sendRichMessage",
+                    chat_id=chat_id,
+                    rich_message={"markdown": text.strip()[:MAX_MESSAGE_LEN]},
+                )
+                if result:
+                    return str(result.get("message_id", ""))
+            except Exception:
+                logger.debug("sendRichMessage failed, falling back to sendMessage", exc_info=True)
+
+        # Fallback: plain text
+        chunks = chunk_message(text, PLAIN_MESSAGE_LEN)
         msg_id = None
         for chunk in chunks:
             result = await self._api(
@@ -95,64 +116,79 @@ class TelegramAdapter(BaseAdapter):
         return msg_id
 
     async def edit(self, chat_id: str, message_id: str, text: str) -> None:
-        """Edit a previously sent message."""
+        """Edit a message. Tries rich, falls back to plain."""
+        if text and text.strip():
+            try:
+                await self._api(
+                    "editMessageText",
+                    chat_id=chat_id,
+                    message_id=int(message_id),
+                    rich_message={"markdown": text.strip()[:MAX_MESSAGE_LEN]},
+                )
+                return
+            except TelegramAPIError as e:
+                if "message is not modified" in e.description.lower():
+                    return
+                logger.debug("Rich edit failed, falling back to plain", exc_info=True)
+            except Exception:
+                logger.debug("Rich edit failed, falling back to plain", exc_info=True)
+
+        # Fallback: plain text edit
         try:
             await self._api(
                 "editMessageText",
                 chat_id=chat_id,
                 message_id=int(message_id),
-                text=text[:MAX_MESSAGE_LEN],
+                text=text[:PLAIN_MESSAGE_LEN],
                 parse_mode="Markdown",
                 disable_web_page_preview=True,
             )
         except TelegramAPIError as e:
             if "message is not modified" in e.description.lower():
-                pass  # Content unchanged, ignore
+                pass
             elif "parse" in e.description.lower():
-                # Markdown parse error — retry without parse_mode
                 await self._api(
                     "editMessageText",
                     chat_id=chat_id,
                     message_id=int(message_id),
-                    text=text[:MAX_MESSAGE_LEN],
+                    text=text[:PLAIN_MESSAGE_LEN],
                     disable_web_page_preview=True,
                 )
             else:
                 raise
 
     async def send_draft(self, chat_id: str, text: str, draft_id: str | None = None) -> str:
-        """Send a streaming draft using sendMessageDraft (Bot API 9.5+).
-
-        Returns the draft_id for subsequent updates.
-        Falls back to edit-based streaming if the API doesn't support drafts.
-        """
+        """Stream a draft. Uses rich drafts, falls back to plain drafts."""
         if not self._supports_draft:
             raise TelegramAPIError(400, "Draft not supported")
 
+        if not text or not text.strip():
+            text = "_Thinking..._"
+
+        # Try rich draft
         try:
             params: dict = {
                 "chat_id": chat_id,
-                "text": text[:MAX_MESSAGE_LEN],
-                "parse_mode": "Markdown",
+                "rich_message": {"markdown": text.strip()[:MAX_MESSAGE_LEN]},
             }
             if draft_id:
                 params["draft_id"] = draft_id
-
-            result = await self._api("sendMessageDraft", **params)
+            result = await self._api("sendRichMessageDraft", **params)
             return str(result.get("draft_id", result.get("message_id", "")))
-
         except TelegramAPIError as e:
             if e.code == 404 or "unknown method" in e.description.lower():
-                # API doesn't support sendMessageDraft — fall back
                 self._supports_draft = False
-                logger.info("Telegram sendMessageDraft not available, falling back to editMessageText")
                 raise
-            # Markdown parse failure — retry without parse_mode
-            if "parse" in e.description.lower():
-                params.pop("parse_mode", None)
-                result = await self._api("sendMessageDraft", **params)
-                return str(result.get("draft_id", result.get("message_id", "")))
-            raise
+            logger.debug("sendRichMessageDraft failed, trying plain", exc_info=True)
+        except Exception:
+            logger.debug("sendRichMessageDraft failed, trying plain", exc_info=True)
+
+        # Fallback: plain draft (no parse_mode — guaranteed to work)
+        params = {"chat_id": chat_id, "text": text[:PLAIN_MESSAGE_LEN]}
+        if draft_id:
+            params["draft_id"] = draft_id
+        result = await self._api("sendMessageDraft", **params)
+        return str(result.get("draft_id", result.get("message_id", "")))
 
     async def send_typing(self, chat_id: str) -> None:
         try:
@@ -237,13 +273,6 @@ class TelegramAdapter(BaseAdapter):
         if not body.get("ok"):
             error_code = body.get("error_code", resp.status_code)
             description = body.get("description", "Unknown error")
-            # Markdown parse failure — retry without parse_mode
-            if error_code == 400 and "parse" in description.lower() and "text" in data:
-                data.pop("parse_mode", None)
-                resp = await self._client.post(url, json=data)
-                body = resp.json()
-                if body.get("ok"):
-                    return body.get("result")
             raise TelegramAPIError(error_code, description)
 
         return body.get("result")
