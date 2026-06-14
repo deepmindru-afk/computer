@@ -70,10 +70,40 @@ class ProxyFallbackMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Auth check: this middleware runs before the auth middleware (outermost),
+        # so we must verify the session ourselves to prevent unauthenticated SSRF.
+        if not self._is_authenticated(scope):
+            # Not authenticated — fall through to the normal app (which will
+            # either serve a page or return 401 via the auth middleware).
+            await self.app(scope, receive, send)
+            return
+
         if scope["type"] == "http":
             await self._proxy_http(scope, receive, send, port, path)
         elif scope["type"] == "websocket":
             await self._proxy_websocket(scope, receive, send, port, path)
+
+    @staticmethod
+    def _is_authenticated(scope: Scope) -> bool:
+        """Check if the request carries a valid cptr session cookie."""
+        from cptr.utils.config import check_access
+
+        headers = dict(scope.get("headers", []))
+        cookie_header = (headers.get(b"cookie") or b"").decode("latin-1", errors="replace")
+
+        token = None
+        for part in cookie_header.split(";"):
+            part = part.strip()
+            if part.startswith("cptr_session="):
+                token = part.split("=", 1)[1]
+                break
+
+        if not token:
+            return False
+
+        client = scope.get("client")
+        client_host = client[0] if client else "127.0.0.1"
+        return check_access(client_host=client_host, jwt_token=token) is not None
 
     def _resolve_port(self, scope: Scope) -> int | None:
         """Determine which proxy port this request belongs to."""

@@ -128,6 +128,18 @@ from cptr.utils.proxy_middleware import ProxyFallbackMiddleware
 
 app.add_middleware(ProxyFallbackMiddleware)
 
+# CORS middleware: uses CPTR_CORS_ALLOWED_ORIGINS env var (default "*").
+from fastapi.middleware.cors import CORSMiddleware
+from cptr.env import CORS_ALLOWED_ORIGINS
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOWED_ORIGINS if isinstance(CORS_ALLOWED_ORIGINS, list) else ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # Path normalization middleware (Windows: \ → / in JSON responses)
 import platform

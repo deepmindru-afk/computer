@@ -37,3 +37,13 @@ STREAM_WRITE_TIMEOUT_SECONDS = float(os.environ.get("CPTR_STREAM_WRITE_TIMEOUT",
 # ── Automation scheduler ────────────────────────────────────
 AUTOMATION_POLL_INTERVAL = int(os.environ.get("AUTOMATION_POLL_INTERVAL", "10"))
 
+# ── CORS ────────────────────────────────────────────────────
+# Socket.IO CORS allowed origins.
+# Default → "*" (allow all origins)
+# Comma-separated list → allow specific origins only
+#   e.g. "https://example.com,https://app.example.com"
+_cors_raw = os.environ.get("CPTR_CORS_ALLOWED_ORIGINS", "*")
+if _cors_raw.strip() == "*":
+    CORS_ALLOWED_ORIGINS = "*"
+else:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_raw.split(",") if o.strip()] or "*"

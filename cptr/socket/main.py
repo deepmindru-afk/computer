@@ -10,8 +10,9 @@ from __future__ import annotations
 import socketio
 
 from cptr.utils.config import check_access
+from cptr.env import CORS_ALLOWED_ORIGINS
 
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=CORS_ALLOWED_ORIGINS)
 
 # user_id → set of connected sids
 _user_sids: dict[str, set[str]] = {}
