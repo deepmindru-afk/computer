@@ -15,7 +15,7 @@
 	let { onclose, oncreated }: Props = $props();
 
 	let formName = $state('');
-	let formProvider = $state<'anthropic' | 'openai'>('anthropic');
+	let formProvider = $state<'openai' | 'anthropic'>('openai');
 	let formApiType = $state<'chat_completions' | 'responses'>('chat_completions');
 	let formBaseUrl = $state('');
 	let formApiKey = $state('');
@@ -94,8 +94,8 @@
 					bind:value={formProvider}
 					class="block w-full bg-transparent text-[13px] text-gray-700 dark:text-gray-300 outline-none py-0.5 cursor-pointer"
 				>
-					<option value="anthropic">Anthropic</option>
 					<option value="openai">OpenAI</option>
+					<option value="anthropic">Anthropic</option>
 				</select>
 			</div>
 		</div>

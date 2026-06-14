@@ -130,8 +130,8 @@
 					bind:value={formProvider}
 					class="block w-full bg-transparent text-[13px] text-gray-700 dark:text-gray-300 outline-none py-0.5 cursor-pointer"
 				>
-					<option value="anthropic">Anthropic</option>
 					<option value="openai">OpenAI</option>
+					<option value="anthropic">Anthropic</option>
 				</select>
 			</div>
 		</div>

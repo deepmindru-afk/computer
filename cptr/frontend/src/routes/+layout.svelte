@@ -43,10 +43,12 @@
 	import { t } from '$lib/i18n';
 	import { refreshChatState, bindGlobalChatListener } from '$lib/stores/chat';
 	import { refreshAudioState } from '$lib/stores/audio';
+	import SetupWizard from '$lib/components/SetupWizard.svelte';
 
 	let { children } = $props();
 	let showSettings = $state(false);
 	let showUpdateToast = $state(false);
+	let showSetup = $state(false);
 
 	// Auth state
 	type AuthState = 'checking' | 'needs_setup' | 'needs_login' | 'authenticated';
@@ -117,6 +119,20 @@
 		}
 	});
 
+	// Check ?setup=true param for admin setup wizard
+	$effect(() => {
+		if (!$stateLoaded) return;
+		if (authState !== 'authenticated') return;
+
+		const params = new URLSearchParams(window.location.search);
+		if (params.get('setup') === 'true' && $session?.role === 'admin') {
+			showSetup = true;
+			const url = new URL(window.location.href);
+			url.searchParams.delete('setup');
+			window.history.replaceState({}, '', url.toString());
+		}
+	});
+
 	async function checkAuth() {
 		try {
 			const params = new URLSearchParams(window.location.search);
@@ -167,6 +183,7 @@
 	}
 
 	async function handleAuth() {
+		const wasSetup = authState === 'needs_setup';
 		try {
 			const auth = await getSession();
 			if (auth.authenticated) {
@@ -181,6 +198,7 @@
 				initState();
 				refreshChatState();
 				refreshAudioState();
+				if (wasSetup) showSetup = true;
 				return;
 			}
 		} catch {}
@@ -299,6 +317,8 @@
 		token={startupToken}
 		onauth={handleAuth}
 	/>
+{:else if $stateLoaded && showSetup}
+	<SetupWizard oncomplete={() => { showSetup = false; }} />
 {:else if $stateLoaded}
 	<div
 		class="h-screen max-h-[100dvh] flex overflow-hidden font-sans antialiased text-gray-900 bg-white dark:text-gray-100 dark:bg-black"
