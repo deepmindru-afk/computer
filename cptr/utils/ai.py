@@ -476,6 +476,15 @@ async def stream_openai_completions(
 
 def _to_responses_input(messages: list[dict], instructions: str) -> list[dict]:
     """Canonical messages → Responses API input items."""
+    # Pre-collect all tool result call_ids so we can validate function_calls
+    # have matching outputs.  This prevents orphaned function_calls (from
+    # crashes, data corruption, etc.) from permanently breaking the chat.
+    tool_result_ids = {
+        m.get("tool_call_id", "")
+        for m in messages
+        if m.get("role") == "tool"
+    }
+
     items = []
     for m in messages:
         role = m["role"]
@@ -504,8 +513,16 @@ def _to_responses_input(messages: list[dict], instructions: str) -> list[dict]:
             for ri in m.get("reasoning_items", []):
                 items.append(ri)
             for tc in m["tool_calls"]:
-                args = tc["function"].get("arguments", "{}")
                 call_id = tc.get("id", "")
+                # Skip function_calls that have no matching tool result
+                if call_id and call_id not in tool_result_ids:
+                    logger.warning(
+                        "[responses] Skipping orphaned function_call %s (%s) — no matching tool result",
+                        call_id,
+                        tc.get("function", {}).get("name", "?"),
+                    )
+                    continue
+                args = tc["function"].get("arguments", "{}")
                 # Responses API requires id to start with "fc_"
                 fc_id = tc.get("fc_id", "")
                 if not fc_id or not fc_id.startswith("fc_"):
