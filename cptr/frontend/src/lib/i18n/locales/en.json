@@ -171,6 +171,8 @@
 	"git.stageAll": "Stage all",
 	"git.unstageAll": "Unstage all",
 	"git.discard": "Discard",
+	"git.undoCommit": "Undo commit",
+	"git.copyCommitHash": "Copy commit hash",
 	"git.copyFilePath": "Copy File Path",
 	"git.copyRelativePath": "Copy Relative File Path",
 

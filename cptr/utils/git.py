@@ -63,6 +63,7 @@ async def status(root: str) -> dict[str, Any]:
     upstream = ""
     ahead = 0
     behind = 0
+    has_ab = False
     files: list[dict] = []
 
     for line in out.splitlines():
@@ -71,6 +72,7 @@ async def status(root: str) -> dict[str, Any]:
         elif line.startswith("# branch.upstream "):
             upstream = line.split(" ", 2)[2]
         elif line.startswith("# branch.ab "):
+            has_ab = True
             parts = line.split()
             ahead = int(parts[2].lstrip("+"))
             behind = abs(int(parts[3].lstrip("-")))
@@ -109,6 +111,11 @@ async def status(root: str) -> dict[str, Any]:
             parts = line.split(" ", 10)
             path = parts[-1]
             files.append({"path": path, "status": "conflict", "staged": False})
+
+    # upstream is set but remote branch doesn't exist yet (no ab line)
+    # — treat as unpublished so the frontend shows "Publish"
+    if upstream and not has_ab:
+        upstream = ""
 
     return {
         "branch": branch,
@@ -440,7 +447,8 @@ async def push(
 async def uncommit(root: str) -> dict[str, str]:
     """Undo the last commit, moving its changes back to the staging area.
 
-    Uses ``git reset --soft HEAD~1``.
+    Uses ``git reset --soft HEAD~1``, or ``git update-ref -d HEAD`` for root
+    commits (no parent).
     """
     # Grab info about the commit we're about to undo
     _, log_out, _ = await _run(
@@ -450,7 +458,13 @@ async def uncommit(root: str) -> dict[str, str]:
     undone_hash = parts[1] if len(parts) >= 2 else ""
     undone_msg = parts[2] if len(parts) >= 3 else ""
 
-    await _run("reset", "--soft", "HEAD~1", cwd=root)
+    # Check if HEAD~1 exists (root commits have no parent)
+    code, _, _ = await _run("rev-parse", "--verify", "HEAD~1", cwd=root, check=False)
+    if code != 0:
+        # Root commit: remove HEAD ref, keeps index (staged files) intact
+        await _run("update-ref", "-d", "HEAD", cwd=root)
+    else:
+        await _run("reset", "--soft", "HEAD~1", cwd=root)
 
     return {"hash": undone_hash, "message": undone_msg}
 
