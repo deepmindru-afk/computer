@@ -14,7 +14,7 @@
 
 <sub>See more at [cptr.sh](https://cptr.sh/)</sub>
 
-`cptr` (short for "computer") runs on your machine and serves your whole computer (files, terminal, editor, git) to any browser.
+`cptr` (short for "computer") runs on your machine and serves your whole computer (files, terminal, editor, git) to any browser. It literally is your computer.
 
 Phone, tablet, laptop, another computer, even the one it's running on. Designed to feel native on every screen. Plug in an AI that can actually read, write, and run things on your machine, or bring your favourite terminal agent. Terminal multiplexer, parallel AI agents, full workstation, one tool, any device.
 
