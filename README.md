@@ -70,6 +70,9 @@ Bring your own API key. Works with OpenAI, Anthropic, Ollama, or any OpenAI-comp
 | | |
 |---|---|
 | 💬 **Chat** | Built-in AI with streaming responses and tool calling. Not just conversation: it can act. |
+| 🎙️ **Voice mode** | Talk to the AI hands-free. It listens, responds, and reads the answer back to you. The mic re-arms so you can have a real conversation. |
+| 🔊 **Text-to-speech** | AI responses read aloud, sentence by sentence. Works with any OpenAI-compatible TTS API. |
+| 💭 **Reasoning** | See what the AI is thinking. Models like o3 and Claude show their chain of thought as expandable sections. |
 | 🔧 **File tools** | AI reads, writes, edits, and searches your codebase directly. |
 | ▶️ **Run commands** | AI executes shell commands and reads the output. Foreground or background. |
 | 🌐 **Web browsing** | Navigate pages, click elements, fill forms, take screenshots. |
@@ -107,6 +110,8 @@ cptr exposes an OpenAI-compatible API (`/v1/chat/completions`). Any client that 
 | 🔔 **Notifications** | Browser notifications and webhooks (Slack, Discord, Teams) when tasks finish. |
 | 📊 **Usage** | Token counts and timing on every response. |
 | 📄 **System prompts** | Per-model, per-workspace, or global. Template variables included. |
+| 📋 **Audit logging** | Structured audit trail of all API mutations with automatic redaction of sensitive data. |
+| 🪵 **Diagnostic logging** | Configurable structured logs (text or JSON) with optional upstream request capture. |
 | ⌨️ **Keyboard shortcuts** | Customisable keybindings with a settings panel. |
 | 🌍 **10 languages** | EN, DE, ES, FR, JA, KO, PT-BR, RU, ZH-CN, ZH-TW. |
 | 🔐 **Auth** | Username/password with JWT sessions. Signup toggle for admins. |

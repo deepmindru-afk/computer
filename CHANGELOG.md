@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-16
+
+### Added
+
+- 🎙️ **Voice mode.** Talk to the AI hands-free. When text-to-speech is configured, a new voice button appears in the chat input. Tap it to start listening. Speak your message, and cptr will transcribe it, send it to the AI, and read the response back to you out loud. The mic re-arms automatically so you can have a back-and-forth conversation without touching the screen.
+- 🔊 **Text-to-speech.** AI responses can now be read aloud. Connect any OpenAI-compatible TTS API from Settings > Audio, pick a voice and format, and responses will stream as audio sentence by sentence. Works with voice mode or on its own: click the speaker icon on any message to hear it.
+- 💭 **Reasoning display.** Models that think before responding (like o3 or Claude with extended thinking) now show their reasoning in the chat. Thought steps appear as collapsible sections you can expand to see what the AI was considering.
+- 📋 **Audit logging.** Every mutating API request (POST, PUT, PATCH, DELETE) can now be logged to a structured JSON file. Sensitive fields like passwords and API keys are automatically redacted. Configure the level of detail with the `CPTR_AUDIT_LOG_LEVEL` environment variable: metadata only, request bodies, or full request and response.
+- 📊 **Upstream request logging.** Optionally log every outgoing AI API call (provider, model, endpoint, request body) to a separate file for debugging and cost tracking. Enable with `CPTR_LOG_UPSTREAM_REQUESTS=true`.
+- 🪵 **Structured logging.** All application logs now go through Loguru with configurable format (text or JSON), level, and rotation. Standard library loggers (uvicorn, etc.) are intercepted and routed through the same system.
+
+### Changed
+
+- 💬 **Redesigned tool call and reasoning UI.** Tool calls and reasoning steps are now displayed as clean, collapsible rows with status indicators (spinning while running, green check when done, red X if rejected). Consecutive tool calls are grouped together so the chat stays compact. Each group shows a summary like "3 read_file, 1 edit_file" and can be expanded to see individual calls with their inputs and outputs.
+- 🔊 **Audio settings expanded.** The Audio admin panel now has separate sections for speech-to-text and text-to-speech, plus a voice mode system prompt that tells the AI to keep responses short and conversational when you are talking to it.
+- 🎙️ **Transcription caching.** Audio transcriptions are cached in the workspace so the same recording is not sent to the API twice. Transcription results are also saved alongside the audio file.
+- 📱 **PWA icon and touch icon.** Updated app icons and added an Apple touch icon for better home screen appearance on iOS.
+- 🌍 **New translation keys.** Added voice mode, TTS, reasoning, and tool call labels across all 10 supported languages.
+
 ## [0.4.10] - 2026-06-15
 
 ### Changed
