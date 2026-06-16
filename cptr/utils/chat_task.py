@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 
 PLAN_MODE_PROMPT = (
     "[Plan Mode] Research the codebase with read-only tools, then present your plan "
-    "using create_artifact. Wait for approval before coding."
+    "using create_artifact. Then wait for an explicit approval message before using "
+    "tools or implementing."
 )
 
 # ── Task registry ───────────────────────────────────────────
@@ -327,7 +328,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "You have access to tools to read, search, and modify files in the workspace. "
     "Use them to help the user with their coding tasks.\n\n"
     "For complex tasks, create an implementation plan first using "
-    "create_artifact, then wait for approval before coding."
+    "create_artifact. Then wait for an explicit approval message before using "
+    "tools or implementing."
     "\n\n{{INSTRUCTIONS}}"
     "\n\n{{SKILLS}}"
     "\n\nWorkspace: {{WORKSPACE_NAME}}"
