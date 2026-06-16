@@ -150,7 +150,8 @@
 		return (item.summary ?? item.content ?? [])
 			.filter((p: any) => 'text' in p)
 			.map((p: any) => p.text ?? '')
-			.join('');
+			.join('')
+			.trim();
 	}
 
 	function updateReasoningText(idx: number, text: string) {

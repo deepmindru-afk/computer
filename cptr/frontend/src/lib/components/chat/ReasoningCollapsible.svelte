@@ -18,7 +18,8 @@
 		return (item.summary ?? item.content ?? [])
 			.filter((part: any) => 'text' in part)
 			.map((part: any) => part.text ?? '')
-			.join('');
+			.join('')
+			.trim();
 	});
 
 	function toggleExpanded() {
