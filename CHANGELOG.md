@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-06-16
+
+### Fixed
+
+- 📋 **Artifact cards no longer stretch or clip text.** The small preview cards that appear when the AI creates a file now have a consistent, fixed height. Long titles and previews are properly truncated instead of pushing the card taller or overflowing.
+
 ## [0.5.1] - 2026-06-16
 
 ### Added

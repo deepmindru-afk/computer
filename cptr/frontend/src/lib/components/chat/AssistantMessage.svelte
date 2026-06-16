@@ -373,11 +373,11 @@
 						{@const artifact = displayItem.item}
 						{@const preview = (artifact.content || '').replace(/^#.*\n*/m, '').trim()}
 						<button
-							class="w-full min-w-0 overflow-hidden text-left my-2 rounded-xl cursor-pointer
+							class="block w-full min-w-0 overflow-hidden text-left my-2 rounded-xl cursor-pointer
 						border border-gray-200 dark:border-white/8
 						hover:border-gray-300 dark:hover:border-white/12
 						hover:bg-gray-50/50 dark:hover:bg-white/[0.03]
-						transition-colors duration-150"
+						transition-colors duration-150 {preview ? 'h-[70px]' : 'h-[38px]'}"
 							onclick={() => {
 								const ws = get(currentWorkspace);
 								if (ws && artifact.path) {
@@ -386,17 +386,19 @@
 								}
 							}}
 						>
-							<div class="min-w-0 px-3 py-2.5">
+							<div class="h-full min-w-0 overflow-hidden px-3 py-2.5">
 								<div
-									class="line-clamp-1 max-h-4 text-xs leading-4 font-medium text-gray-800 dark:text-gray-100 [overflow-wrap:anywhere]"
+									class="h-4 truncate text-xs leading-4 font-medium text-gray-800 dark:text-gray-100"
 								>
 									{artifact.title || $t('chat.artifact')}
 								</div>
 								{#if preview}
-									<div
-										class="line-clamp-2 max-h-8 text-[10px] leading-4 font-normal text-gray-400 dark:text-gray-500 [overflow-wrap:anywhere]"
-									>
-										{preview}
+									<div class="h-8 overflow-hidden">
+										<div
+											class="line-clamp-2 break-words text-[10px] leading-4 font-normal text-gray-400 dark:text-gray-500"
+										>
+											{preview}
+										</div>
 									</div>
 								{/if}
 							</div>

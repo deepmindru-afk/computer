@@ -70,7 +70,7 @@ Bring your own API key. Works with OpenAI, Anthropic, Ollama, or any OpenAI-comp
 | | |
 |---|---|
 | 💬 **Chat** | Built-in AI with streaming responses and tool calling. Not just conversation: it can act. |
-| 🎙️ **Voice mode** | Talk to the AI hands-free. It listens, responds, and reads the answer back to you. The mic re-arms so you can have a real conversation. |
+| 🎙️ **Voice mode** | Talk to your computer hands-free. It listens, responds, and reads the answer back to you. The mic re-arms so you can have a real conversation. |
 | 🔊 **Text-to-speech** | AI responses read aloud, sentence by sentence. Works with any OpenAI-compatible TTS API. |
 | 💭 **Reasoning** | See what the AI is thinking. Models like o3 and Claude show their chain of thought as expandable sections. |
 | 🔧 **File tools** | AI reads, writes, edits, and searches your codebase directly. |
