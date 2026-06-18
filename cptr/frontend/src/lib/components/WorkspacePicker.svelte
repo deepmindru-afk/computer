@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Modal from './Modal.svelte';
-	import Icon from './Icon.svelte';
 	import type { LaunchIntent, ShareBehavior } from '$lib/intents/types';
 	import { t } from '$lib/i18n';
 
@@ -79,7 +78,6 @@
 					onclick={() => chooseWorkspace(ws)}
 					onmouseenter={() => (selectedIndex = i)}
 				>
-					<Icon name="folder" size={14} class="shrink-0 text-gray-400" />
 					<span class="text-xs shrink-0 truncate max-w-[34%]">{ws.name}</span>
 					<span
 						class="text-[11px] text-gray-400 overflow-hidden text-ellipsis whitespace-nowrap font-mono"

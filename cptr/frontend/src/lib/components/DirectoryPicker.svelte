@@ -331,8 +331,7 @@
 				{#if tabHint}
 					<span class="text-[10px] text-gray-400 whitespace-nowrap shrink-0">{tabHint}</span>
 				{/if}
-				<span
-					class="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/6 text-gray-400 shrink-0"
+				<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/6 text-gray-400 shrink-0"
 					>TAB</span
 				>
 			</div>
@@ -352,7 +351,7 @@
 						>{/if}
 					{#if i === breadcrumbs.length - 1}
 						<span
-							class="text-[11px] font-mono font-medium text-gray-900 dark:text-white whitespace-nowrap overflow-hidden text-ellipsis"
+							class="text-[11px] font-mono text-gray-900 dark:text-white whitespace-nowrap overflow-hidden text-ellipsis"
 							>{seg.name}</span
 						>
 					{:else}
@@ -443,11 +442,11 @@
 			title={currentPath}>{currentPath}</span
 		>
 		<button
-			class="text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 rounded-lg transition-colors duration-100 shrink-0"
+			class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 rounded-lg transition-colors duration-100 shrink-0"
 			onclick={onclose}>{$t('directory.cancel')}</button
 		>
 		<button
-			class="text-xs font-medium text-white dark:text-black bg-gray-900 dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors duration-100 shrink-0"
+			class="text-xs text-white dark:text-black bg-gray-900 dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors duration-100 shrink-0"
 			onclick={selectCurrent}>{$t('directory.open', { name: currentFolderName })}</button
 		>
 	</div>

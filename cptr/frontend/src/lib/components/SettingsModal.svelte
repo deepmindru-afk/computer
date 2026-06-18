@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount, untrack } from 'svelte';
 	import Icon from './Icon.svelte';
 	import Modal from './Modal.svelte';
 	import General from './Settings/General.svelte';
@@ -41,17 +42,23 @@
 
 	let { onclose, initialTab = 'general' }: Props = $props();
 
-	let activeTab = $state<Tab>(initialTab);
+	let activeTab = $state<Tab>(untrack(() => (initialTab === 'pwa' ? 'general' : initialTab)));
+	let showPwaSettings = $state(false);
 
 	const isAdmin = $derived($session?.role === 'admin');
 
-	const personalTabs: { id: Tab; label: string; icon: string }[] = $derived([
-		{ id: 'general', label: $t('settings.general'), icon: 'settings' },
-		{ id: 'keyboard', label: $t('settings.keyboard'), icon: 'terminal' },
-		{ id: 'account', label: $t('settings.account'), icon: 'user' },
-		{ id: 'pwa', label: 'PWA', icon: 'phone' },
-		{ id: 'about', label: $t('settings.about'), icon: 'info' }
-	]);
+	type SettingsTab = { id: Tab; label: string; icon: string };
+
+	const personalTabs: SettingsTab[] = $derived.by(() => {
+		const tabs: SettingsTab[] = [
+			{ id: 'general', label: $t('settings.general'), icon: 'settings' },
+			{ id: 'keyboard', label: $t('settings.keyboard'), icon: 'terminal' },
+			{ id: 'account', label: $t('settings.account'), icon: 'user' }
+		];
+		if (showPwaSettings) tabs.push({ id: 'pwa', label: 'PWA', icon: 'phone' });
+		tabs.push({ id: 'about', label: $t('settings.about'), icon: 'info' });
+		return tabs;
+	});
 
 	const adminTabs: { id: Tab; label: string; icon: string }[] = $derived([
 		{ id: 'users', label: $t('admin.users'), icon: 'user' },
@@ -64,6 +71,26 @@
 		{ id: 'toolservers', label: $t('admin.toolServers'), icon: 'plug' },
 		{ id: 'subagents', label: $t('admin.subagents'), icon: 'user' }
 	]);
+
+	onMount(() => {
+		showPwaSettings = isInstalledPwa();
+		if (showPwaSettings && initialTab === 'pwa') {
+			activeTab = 'pwa';
+		} else if (initialTab !== 'pwa') {
+			activeTab = initialTab;
+		} else {
+			activeTab = 'general';
+		}
+	});
+
+	function isInstalledPwa(): boolean {
+		const nav = navigator as Navigator & { standalone?: boolean };
+		return (
+			window.matchMedia('(display-mode: standalone)').matches ||
+			window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+			nav.standalone === true
+		);
+	}
 </script>
 
 <Modal
@@ -121,7 +148,7 @@
 	<div class="flex-1 overflow-y-auto min-h-0 p-4 md:px-5">
 		{#if activeTab === 'general'}
 			<General />
-		{:else if activeTab === 'pwa'}
+		{:else if activeTab === 'pwa' && showPwaSettings}
 			<PWA />
 		{:else if activeTab === 'keyboard'}
 			<Keyboard />
