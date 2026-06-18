@@ -28,6 +28,7 @@ import { listSessions, createSession, deleteSession } from '$lib/apis/terminal';
 import { changeLocale, i18next } from '$lib/i18n';
 import { streamingChatTabs } from '$lib/stores/chat';
 import { keybindings, loadKeybindings } from '$lib/stores/keybindings';
+import { defaultPwaPreferences, type PwaPreferences } from '$lib/intents/types';
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ export interface Tab {
 	type: 'files' | 'terminal' | 'file' | 'git' | 'chat' | 'preview';
 	label: string;
 	filePath?: string;
+	edit?: boolean;
 	path?: string; // generic path (e.g. for chat)
 	sessionId?: string;
 	port?: number;
@@ -78,6 +80,7 @@ export interface UserPreferences {
 	selectedModelId?: string; // last selected chat model, synced across browsers
 	requestParams?: Record<string, unknown>; // arbitrary params merged into API request body
 	showUpdateToast?: boolean; // show version update notifications (default true)
+	pwa?: PwaPreferences;
 }
 
 export type Theme = 'dark' | 'light' | 'system';
@@ -170,6 +173,7 @@ export const isGitRepo = writable(false);
 export type StreamingBehavior = 'queue' | 'interrupt';
 export const streamingBehavior = writable<StreamingBehavior>('queue');
 export const selectedModelId = writable<string>('');
+export const pwaPreferences = writable<PwaPreferences>(defaultPwaPreferences);
 
 /** Saved workspace path order for sidebar drag-reorder. */
 export const workspaceOrder = writable<string[]>([]);
@@ -305,7 +309,8 @@ function persistPreferences(): void {
 			version: get(lastSeenVersion),
 			selectedModelId: get(selectedModelId) || undefined,
 			requestParams: Object.keys(get(requestParams)).length ? get(requestParams) : undefined,
-			showUpdateToast: get(showUpdateToastPref)
+			showUpdateToast: get(showUpdateToastPref),
+			pwa: get(pwaPreferences)
 		};
 		savePreferences(prefs as unknown as Record<string, unknown>).catch(() => {});
 	}, 300);
@@ -351,6 +356,9 @@ function subscribeForPersistence() {
 	showUpdateToastPref.subscribe(() => {
 		if (get(stateLoaded)) persistPreferences();
 	});
+	pwaPreferences.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
 	i18next.on('languageChanged', () => {
 		if (get(stateLoaded)) persistPreferences();
 	});
@@ -379,6 +387,12 @@ export async function loadPreferences(): Promise<void> {
 		if (prefs.selectedModelId) selectedModelId.set(prefs.selectedModelId as string);
 		if (prefs.requestParams) requestParams.set(prefs.requestParams as Record<string, unknown>);
 		if (prefs.showUpdateToast !== undefined) showUpdateToastPref.set(prefs.showUpdateToast as boolean);
+		const pwaPrefs = prefs.pwa;
+		if (pwaPrefs)
+			pwaPreferences.set({
+				...defaultPwaPreferences,
+				...(pwaPrefs as PwaPreferences)
+			});
 	} catch {
 		// First run, no preferences yet
 	}
@@ -493,6 +507,46 @@ if (typeof window !== 'undefined') {
 	});
 }
 
+// ── Cross-tab state sync (BroadcastChannel) ─────────────────────
+// Syncs theme and locale changes between browser tabs / PWA windows
+// so the user doesn't see divergent state.
+
+if (typeof BroadcastChannel !== 'undefined') {
+	const channel = new BroadcastChannel('cptr-sync');
+
+	let _syncingFromBroadcast = false;
+
+	channel.onmessage = (e: MessageEvent) => {
+		const { type, value } = e.data || {};
+		_syncingFromBroadcast = true;
+		try {
+			if (type === 'theme' && value) {
+				theme.set(value);
+			} else if (type === 'locale' && value) {
+				changeLocale(value);
+			}
+		} finally {
+			_syncingFromBroadcast = false;
+		}
+	};
+
+	theme.subscribe((t) => {
+		if (!_syncingFromBroadcast) {
+			channel.postMessage({ type: 'theme', value: t });
+		}
+	});
+
+	// Locale changes are broadcast from changeLocale() calls;
+	// subscribe to i18next language changes.
+	if (i18next) {
+		i18next.on('languageChanged', (lng: string) => {
+			if (!_syncingFromBroadcast) {
+				channel.postMessage({ type: 'locale', value: lng });
+			}
+		});
+	}
+}
+
 // ── Workspace actions ───────────────────────────────────────────
 
 /**
@@ -587,7 +641,11 @@ export function reorderTabs(oldIndex: number, newIndex: number, groupId?: string
 	});
 }
 
-export function openFileTab(filePath: string, targetGroupId?: string): void {
+export function openFileTab(
+	filePath: string,
+	targetGroupId?: string,
+	options: { edit?: boolean } = {}
+): void {
 	const ws = get(currentWorkspace);
 	if (!ws) return;
 
@@ -598,6 +656,13 @@ export function openFileTab(filePath: string, targetGroupId?: string): void {
 	// Reuse existing tab within this group
 	const existing = group.tabs.find((t) => t.type === 'file' && t.filePath === filePath);
 	if (existing) {
+		if (options.edit) {
+			updateGroupTabs(gid, (tabs) => ({
+				tabs: tabs.map((t) => (t.id === existing.id ? { ...t, edit: true } : t)),
+				activeTabId: existing.id
+			}));
+			return;
+		}
 		setActiveTab(existing.id, gid);
 		return;
 	}
@@ -607,7 +672,8 @@ export function openFileTab(filePath: string, targetGroupId?: string): void {
 		id: nextId(),
 		type: 'file',
 		label: name,
-		filePath
+		filePath,
+		edit: options.edit
 	};
 
 	updateGroupTabs(gid, (tabs) => ({
@@ -858,6 +924,24 @@ export function updateTabFilePath(tabId: string, newPath: string): void {
 				tabs: g.tabs.map((t) =>
 					t.id === tabId ? { ...t, filePath: newPath, label: name, unsaved: false } : t
 				)
+			}))
+		};
+	});
+}
+
+export function clearTabEdit(tabId: string): void {
+	currentWorkspace.update((ws) => {
+		if (!ws) return ws;
+		return {
+			...ws,
+			groups: ws.groups.map((g) => ({
+				...g,
+				tabs: g.tabs.map((t) => {
+					if (t.id !== tabId || !t.edit) return t;
+					const next = { ...t };
+					delete next.edit;
+					return next;
+				})
 			}))
 		};
 	});

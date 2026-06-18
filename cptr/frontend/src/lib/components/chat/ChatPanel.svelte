@@ -6,6 +6,7 @@
 		sendMessage as apiSendMessage,
 		approveToolCall,
 		cancelTask,
+		compactChat as apiCompactChat,
 		updateCurrentMessage,
 		updateMessage,
 		createMessage,
@@ -13,7 +14,8 @@
 		queueDelete as apiQueueDelete,
 		type ChatMessageRow,
 		type ChatSendParams,
-		type ChatInfo
+		type ChatInfo,
+		type ContextUsage
 	} from '$lib/apis/chat';
 	import {
 		chatModels,
@@ -49,6 +51,7 @@
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import ChatHistory from './ChatHistory.svelte';
+	import StatusModal from './StatusModal.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import { toast } from 'svelte-sonner';
 	import { t } from '$lib/i18n';
@@ -71,6 +74,8 @@
 	let selectedModel = $state('');
 	let allMessages = $state<ChatMessageRow[]>([]);
 	let currentMessageId = $state<string | null>(null);
+	let contextUsage = $state<ContextUsage | null>(null);
+	let showStatusModal = $state(false);
 	let previousChats = $state<ChatInfo[]>([]);
 	let messagesEl: HTMLDivElement;
 	let chatInputEl: ChatInput;
@@ -78,6 +83,7 @@
 	let autoScroll = $state(true);
 	let cancelledMessageId: string | null = null;
 	let loading = $state(!!initialChatId);
+	let chatTitle = '';
 	let ttsQueue: string[] = [];
 	let ttsBuffer = '';
 	let ttsInsideCodeFence = false;
@@ -98,6 +104,16 @@
 	const ttsPreparedAudio = new Map<string, PreparedTtsAudio>();
 	const TTS_AUDIO_CACHE_LIMIT_BYTES = 20 * 1024 * 1024;
 	const TTS_MAX_PREFETCH = 2;
+
+	onMount(() => {
+		if (initialChatId || typeof sessionStorage === 'undefined') return;
+		const key = `cptr:intent:chatDraft:${workspace}`;
+		const draft = sessionStorage.getItem(key);
+		if (draft) {
+			inputText = draft;
+			sessionStorage.removeItem(key);
+		}
+	});
 
 	// ── Windowed rendering ──────────────────────────────────────
 	// Only render the last N turns to keep the DOM light for long chats.
@@ -266,13 +282,15 @@
 		const savedScroll = !isInitialLoad && messagesEl ? messagesEl.scrollTop : -1;
 
 		try {
-			const data = await getChat(id);
+			const data = await getChat(id, selectedModel || undefined);
 			// Discard stale response if a newer loadChat was called while we waited
 			if (gen !== loadGeneration) return;
 			allMessages = data.messages;
 			currentMessageId = data.chat.current_message_id;
+			contextUsage = data.context_usage ?? null;
 			// Update tab label with the real title from the DB
 			if (tabId && data.chat.title) {
+				chatTitle = data.chat.title;
 				updateTab(tabId, id, data.chat.title);
 			}
 		} finally {
@@ -601,6 +619,20 @@
 		let text = inputText.trim();
 		if (!text || !selectedModel) return;
 		if (sending) return;
+		if (text === '/compact') {
+			await handleManualCompact();
+			return;
+		}
+		if (text === '/plan') {
+			handlePlanCommand();
+			inputText = '';
+			return;
+		}
+		if (text === '/status') {
+			handleStatusCommand();
+			inputText = '';
+			return;
+		}
 		stopTtsPlayback();
 		if (shouldStreamTts()) void unlockTtsAudioPlayback();
 		sending = true;
@@ -733,6 +765,40 @@
 			sending = false;
 			chatInputEl?.focus();
 		}
+	}
+
+	async function handleManualCompact() {
+		if (!chatId) {
+			toast.message($t('chat.compactNoChat'));
+			return;
+		}
+		if (!selectedModel || sending || streaming) return;
+		sending = true;
+		inputText = '';
+		const toastId = toast.loading($t('chat.compacting'));
+		try {
+			const result = await apiCompactChat(chatId, selectedModel);
+			contextUsage = result.context_usage ?? contextUsage;
+			if (result.compacted) {
+				toast.success($t('chat.compactDone'), { id: toastId });
+			} else {
+				toast.message($t('chat.compactSkipped'), { id: toastId });
+			}
+			await loadChat(chatId);
+		} catch (err: any) {
+			toast.error(err?.message || $t('chat.compactFailed'), { id: toastId });
+		} finally {
+			sending = false;
+			chatInputEl?.focus();
+		}
+	}
+
+	function handlePlanCommand() {
+		planMode.set(!get(planMode));
+	}
+
+	function handleStatusCommand() {
+		showStatusModal = true;
 	}
 
 	// ── Queue actions ──────────────────────────────────────────
@@ -1225,7 +1291,7 @@
 				if (generation !== ttsGeneration) break;
 				if (ttsObjectUrl) URL.revokeObjectURL(ttsObjectUrl);
 				ttsObjectUrl = URL.createObjectURL(blob);
-				ttsAudio = setTtsAudioPlaybackSource(ttsObjectUrl) ?? new Audio(ttsObjectUrl);
+				ttsAudio = setTtsAudioPlaybackSource(ttsObjectUrl, chatTitle) ?? new Audio(ttsObjectUrl);
 				await new Promise<void>((resolve, reject) => {
 					const audio = ttsAudio!;
 					audio.onended = () => resolve();
@@ -1385,7 +1451,11 @@
 					{sending}
 					{streaming}
 					{workspace}
+					{contextUsage}
 					onsend={send}
+					oncompact={handleManualCompact}
+					onplan={handlePlanCommand}
+					onstatus={handleStatusCommand}
 					oncancel={handleCancel}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
@@ -1396,3 +1466,7 @@
 		</div>
 	{/if}
 </div>
+
+{#if showStatusModal}
+	<StatusModal {chatId} {contextUsage} onclose={() => (showStatusModal = false)} />
+{/if}

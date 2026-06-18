@@ -64,7 +64,7 @@
 </script>
 
 <nav
-	class="flex items-center h-9 px-1.5 gap-1 shrink-0 select-none border-b border-gray-200 dark:border-white/6"
+	class="wco-bar flex items-center h-9 px-1.5 gap-1 shrink-0 select-none border-b border-gray-200 dark:border-white/6"
 >
 	<!-- Sidebar toggle (only when closed) -->
 	{#if !$sidebarOpen}
@@ -121,3 +121,18 @@
 		onclose={() => (showSplitMenu = false)}
 	/>
 {/if}
+
+<style>
+	@media (display-mode: window-controls-overlay) {
+		.wco-bar {
+			padding-left: env(titlebar-area-x, 0px);
+			width: env(titlebar-area-width, 100%);
+			height: env(titlebar-area-height, 36px);
+			app-region: drag;
+		}
+		.wco-bar button,
+		.wco-bar a {
+			app-region: no-drag;
+		}
+	}
+</style>

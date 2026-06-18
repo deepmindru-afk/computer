@@ -251,7 +251,11 @@ async def _fetch_provider_models(conn: dict) -> list[str]:
 
 
 @router.get("/{chat_id}")
-async def get_chat(chat_id: str, request: Request):
+async def get_chat(
+    chat_id: str,
+    request: Request,
+    model_id: str | None = Query(None, description="Model used for system prompt context"),
+):
     """Get chat metadata + all messages."""
     user_id = _get_user(request)
     chat = await Chat.get_by_id(chat_id)
@@ -259,6 +263,7 @@ async def get_chat(chat_id: str, request: Request):
         raise HTTPException(404, "chat not found")
 
     messages = await ChatMessage.get_all_by_chat(chat_id)
+    context_usage = await _get_chat_context_usage(chat, model_id)
     return {
         "chat": {
             "id": chat.id,
@@ -270,6 +275,7 @@ async def get_chat(chat_id: str, request: Request):
             "updated_at": chat.updated_at,
         },
         "messages": [_message_dict(m) for m in messages],
+        "context_usage": context_usage,
     }
 
 
@@ -295,6 +301,77 @@ def _message_dict(m) -> dict:
         d["output"] = live["output"]
         d["done"] = False
     return d
+
+
+async def _get_context_leaf_message_id(chat) -> str | None:
+    if chat.current_message_id:
+        return chat.current_message_id
+    messages = await ChatMessage.get_all_by_chat(chat.id)
+    return messages[-1].id if messages else None
+
+
+async def _get_chat_context_usage(chat, model_id: str | None = None) -> dict | None:
+    message_id = await _get_context_leaf_message_id(chat)
+    if not message_id:
+        return None
+
+    from cptr.utils.chat_task import _load_message_history, _load_system_prompt
+    from cptr.utils.context import (
+        build_context_usage,
+        estimate_context_usage,
+        estimate_messages_tokens,
+    )
+
+    messages, existing_summary = await _load_message_history(chat.id, message_id)
+    workspace = (chat.meta or {}).get("workspace", "")
+    model = model_id or await _infer_chat_model(chat.id)
+    system = await _load_system_prompt(workspace, model or "")
+    if existing_summary:
+        system += f"\n\n[CONVERSATION SUMMARY]\n{existing_summary}"
+
+    usage_checkpoint = await _get_latest_usage_checkpoint(chat.id, message_id)
+    if usage_checkpoint:
+        trailing_messages, usage = usage_checkpoint
+        tokens = usage.get("input_tokens")
+        if isinstance(tokens, int) and tokens > 0:
+            tokens += usage.get("output_tokens", 0)
+            if trailing_messages:
+                tokens += estimate_messages_tokens(
+                    [{"role": m.role, "content": m.content or ""} for m in trailing_messages]
+                )
+            return build_context_usage(tokens, source="estimated")
+
+    return estimate_context_usage(messages, system)
+
+
+async def _infer_chat_model(chat_id: str) -> str:
+    messages = await ChatMessage.get_all_by_chat(chat_id)
+    for message in reversed(messages):
+        if message.model:
+            return message.model
+    return await Config.get("chat.default_model") or ""
+
+
+async def _get_latest_usage_checkpoint(
+    chat_id: str, message_id: str
+) -> tuple[list[ChatMessage], dict] | None:
+    all_msgs = await ChatMessage.get_all_by_chat(chat_id)
+    msg_map = {m.id: m for m in all_msgs}
+    chain = []
+    cur = msg_map.get(message_id)
+    while cur:
+        chain.append(cur)
+        cur = msg_map.get(cur.parent_id) if cur.parent_id else None
+    chain.reverse()
+
+    for index in range(len(chain) - 1, -1, -1):
+        message = chain[index]
+        if message.chat_summary:
+            return None
+        usage = message.usage or {}
+        if message.role == "assistant" and usage.get("input_tokens"):
+            return chain[index + 1 :], usage
+    return None
 
 
 # ── Delete a chat ───────────────────────────────────────────
@@ -330,6 +407,10 @@ class SendMessageRequest(BaseModel):
     regeneration_prompt: Optional[str] = None
     files: List[dict] = []
     params: dict = {}
+
+
+class CompactRequest(BaseModel):
+    model_id: str
 
 
 @router.post("")
@@ -449,6 +530,69 @@ async def send_message(body: SendMessageRequest, request: Request):
     if parent_msg is None or parent_msg.role != "user":
         resp["user_message"] = _message_dict(user_msg)
     return resp
+
+
+# ── Manual context compaction ───────────────────────────────
+
+
+@router.post("/{chat_id}/compact")
+async def compact_chat(chat_id: str, body: CompactRequest, request: Request):
+    """Summarize older active-branch messages and store a compaction checkpoint."""
+    user_id = _get_user(request)
+    chat = await Chat.get_by_id(chat_id)
+    if not chat or chat.user_id != user_id:
+        raise HTTPException(404, "chat not found")
+    if await _chat_has_active_generation(chat_id):
+        raise HTTPException(409, "wait for the current response to finish before compacting")
+
+    message_id = await _get_context_leaf_message_id(chat)
+    if not message_id:
+        return {"ok": True, "compacted": False, "reason": "empty", "context_usage": None}
+    current_msg = await ChatMessage.get_by_id(message_id)
+    if not current_msg or not current_msg.parent_id:
+        usage = await _get_chat_context_usage(chat, body.model_id)
+        return {"ok": True, "compacted": False, "reason": "too_short", "context_usage": usage}
+
+    connection, bare_model = await _resolve_connection(body.model_id, request.app.state)
+
+    from cptr.utils.chat_task import _load_message_history
+    from cptr.utils.summarize import summarize_messages
+
+    messages, existing_summary = await _load_message_history(chat_id, current_msg.parent_id)
+    if not messages:
+        usage = await _get_chat_context_usage(chat, body.model_id)
+        return {"ok": True, "compacted": False, "reason": "too_short", "context_usage": usage}
+
+    provider = connection["provider"]
+    api_key = decrypt_key(connection.get("api_key", ""), _get_jwt_secret())
+    from cptr.utils.chat_task import _default_base_url
+
+    base_url = connection.get("base_url") or _default_base_url(provider)
+    api_type = connection.get("api_type", "chat_completions")
+
+    summary = await summarize_messages(
+        messages,
+        existing_summary,
+        provider,
+        base_url,
+        api_key,
+        bare_model,
+        api_type=api_type,
+    )
+    await ChatMessage.update(message_id, chat_summary=summary)
+
+    from cptr.utils.chat_export import export_chat_to_file
+
+    await export_chat_to_file(chat_id)
+    usage = await _get_chat_context_usage(chat, body.model_id)
+    return {
+        "ok": True,
+        "compacted": True,
+        "dropped_messages": len(messages),
+        "kept_messages": 1,
+        "summary_chars": len(summary),
+        "context_usage": usage,
+    }
 
 
 # ── Approve / reject a pending tool call ────────────────────

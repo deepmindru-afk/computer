@@ -329,11 +329,14 @@ async def pwa_manifest():
     name = f"cptr @ {hostname}" if hostname else "cptr"
 
     return {
+        "id": "/",
         "name": name,
         "short_name": "cptr",
         "description": f"Your computer, from anywhere. v{version}",
         "start_url": "/",
+        "scope": "/",
         "display": "standalone",
+        "display_override": ["window-controls-overlay", "standalone"],
         "orientation": "any",
         "background_color": "#000000",
         "theme_color": "#000000",
@@ -348,6 +351,112 @@ async def pwa_manifest():
             },
         ],
         "categories": ["developer", "productivity", "utilities"],
+        "launch_handler": {"client_mode": ["navigate-existing", "auto"]},
+        "handle_links": "preferred",
+        "note_taking": {"new_note_url": "/?intent=newNote"},
+        "shortcuts": [
+            {
+                "name": "New Chat",
+                "short_name": "Chat",
+                "url": "/?intent=newChat",
+                "icons": [{"src": "/icon-192.png", "sizes": "192x192"}],
+            },
+            {
+                "name": "Open Workspace",
+                "short_name": "Workspace",
+                "url": "/?intent=openWorkspace",
+                "icons": [{"src": "/icon-192.png", "sizes": "192x192"}],
+            },
+            {
+                "name": "New Note",
+                "short_name": "Note",
+                "url": "/?intent=newNote",
+                "icons": [{"src": "/icon-192.png", "sizes": "192x192"}],
+            },
+            {
+                "name": "New Terminal",
+                "short_name": "Terminal",
+                "url": "/?intent=newTerminal",
+                "icons": [{"src": "/icon-192.png", "sizes": "192x192"}],
+            },
+            {
+                "name": "Search",
+                "short_name": "Search",
+                "url": "/?intent=search",
+                "icons": [{"src": "/icon-192.png", "sizes": "192x192"}],
+            },
+        ],
+        "share_target": {
+            "action": "/?intent=share",
+            "method": "POST",
+            "enctype": "multipart/form-data",
+            "params": {
+                "title": "title",
+                "text": "text",
+                "url": "url",
+                "files": [
+                    {
+                        "name": "files",
+                        "accept": [
+                            "text/*",
+                            "application/pdf",
+                            "image/*",
+                            ".md",
+                            ".py",
+                            ".js",
+                            ".ts",
+                            ".tsx",
+                            ".jsx",
+                            ".svelte",
+                            ".json",
+                            ".yaml",
+                            ".yml",
+                            ".toml",
+                            ".rs",
+                            ".go",
+                        ],
+                    }
+                ],
+            },
+        },
+        "file_handlers": [
+            {
+                "action": "/?intent=importFiles",
+                "accept": {
+                    "text/*": [
+                        ".txt",
+                        ".md",
+                        ".py",
+                        ".js",
+                        ".ts",
+                        ".tsx",
+                        ".jsx",
+                        ".svelte",
+                        ".css",
+                        ".html",
+                        ".json",
+                        ".yaml",
+                        ".yml",
+                        ".toml",
+                        ".rs",
+                        ".go",
+                        ".java",
+                        ".c",
+                        ".cpp",
+                        ".h",
+                        ".hpp",
+                        ".sh",
+                    ],
+                    "application/pdf": [".pdf"],
+                    "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"],
+                },
+            }
+        ],
+        "protocol_handlers": [
+            {"protocol": "web+cptr", "url": "/?intent=%s"},
+        ],
+        "prefer_related_applications": False,
+        "related_applications": [],
     }
 
 

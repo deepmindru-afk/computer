@@ -325,10 +325,7 @@ _TEMPLATE_RE = re.compile(r"\{\{(\w+)\}\}")
 DEFAULT_SYSTEM_PROMPT = (
     "You are a helpful coding assistant. "
     "You have access to tools to read, search, and modify files in the workspace. "
-    "Use them to help the user with their coding tasks.\n\n"
-    "For complex tasks, create an implementation plan first using "
-    "create_artifact. Then wait for an explicit approval message before using "
-    "tools or implementing."
+    "Use them to help the user with their coding tasks."
     "\n\n{{INSTRUCTIONS}}"
     "\n\n{{SKILLS}}"
     "\n\nWorkspace: {{WORKSPACE_NAME}}"

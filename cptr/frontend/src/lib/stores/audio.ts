@@ -60,7 +60,7 @@ export function getTtsAudioElement(): HTMLAudioElement | null {
 	return ttsAudioElement;
 }
 
-export function setTtsAudioPlaybackSource(src: string): HTMLAudioElement | null {
+export function setTtsAudioPlaybackSource(src: string, title?: string): HTMLAudioElement | null {
 	const audio = getTtsAudioElement();
 	if (!audio) return null;
 	ttsAudioUseToken += 1;
@@ -69,7 +69,49 @@ export function setTtsAudioPlaybackSource(src: string): HTMLAudioElement | null 
 	audio.muted = false;
 	audio.playbackRate = currentTtsPlaybackSpeed;
 	audio.src = src;
+
+	// Shows playback controls on lock screen (Android) and
+	// Control Center (iOS) while TTS is playing.
+	if ('mediaSession' in navigator) {
+		navigator.mediaSession.metadata = new MediaMetadata({
+			title: title || 'cptr',
+			artist: 'cptr',
+			artwork: [
+				{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+				{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
+			]
+		});
+		navigator.mediaSession.setActionHandler('play', () => {
+			audio.play().catch(() => {});
+		});
+		navigator.mediaSession.setActionHandler('pause', () => {
+			audio.pause();
+		});
+		navigator.mediaSession.setActionHandler('stop', () => {
+			audio.pause();
+			audio.currentTime = 0;
+			clearMediaSession();
+		});
+
+		// Clear media session when playback ends naturally
+		const currentToken = ttsAudioUseToken;
+		audio.addEventListener('ended', function onEnd() {
+			audio.removeEventListener('ended', onEnd);
+			if (ttsAudioUseToken === currentToken) clearMediaSession();
+		});
+	}
+
 	return audio;
+}
+
+/** Clear media session metadata and handlers. */
+export function clearMediaSession() {
+	if ('mediaSession' in navigator) {
+		navigator.mediaSession.metadata = null;
+		navigator.mediaSession.setActionHandler('play', null);
+		navigator.mediaSession.setActionHandler('pause', null);
+		navigator.mediaSession.setActionHandler('stop', null);
+	}
 }
 
 export async function unlockTtsAudioPlayback() {

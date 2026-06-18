@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-06-18
+
+### Added
+
+- 📱 **Full PWA support.** cptr can now be installed as a standalone app on phones, tablets, and desktops. Includes offline caching, an offline fallback page, home screen shortcuts (New Chat, Open Workspace, New Note, New Terminal, Search), and a service worker that keeps static assets available when the server is unreachable.
+- 📤 **Share target.** Share files, text, or links from other apps directly into cptr. On mobile, use the system share sheet to send content straight to a chat.
+- 📂 **File handling.** Opening supported file types (code, documents, images) with cptr now imports them into your workspace with a folder picker.
+- 📊 **Context usage indicator.** The chat panel now shows how full the context window is, so you can see at a glance how much room is left before compaction kicks in.
+- 🗂️ **Workspace picker for imports.** When importing shared files or opening files from outside the app, a workspace picker lets you choose where to save them.
+- 🔧 **PWA settings tab.** A new tab in Settings shows your install status, lets you check for service worker updates, and clear the offline cache.
+- 🖥️ **Status modal.** A new status indicator in the chat panel shows server connection state and context usage at a glance.
+
+### Changed
+
+- 🌐 **Perplexity base URL is now configurable.** You can point the Perplexity search provider at a custom endpoint (like a LiteLLM proxy) from Settings or via the `PERPLEXITY_BASE_URL` environment variable.
+- 🤖 **Simplified default system prompt.** Removed the instruction that told the AI to always create a plan before acting. The AI now helps directly unless you ask it to plan.
+- 📂 **File uploads no longer overwrite existing files.** Uploading a file with the same name as an existing one now automatically adds a number suffix instead of replacing it.
+- 🌍 **New translation keys.** Added PWA, share, file handling, and status labels across supported languages.
+
 ## [0.5.3] - 2026-06-17
 
 ### Added

@@ -18,6 +18,7 @@
 	let tavilyKey = $state('');
 	let braveKey = $state('');
 	let perplexityKey = $state('');
+	let perplexityBaseUrl = $state('');
 	let ccKey = $state('');
 	let ccBaseUrl = $state('');
 	let ccModel = $state('');
@@ -44,6 +45,7 @@
 			tavilyKey = (config['web.tavily_api_key'] as string) || '';
 			braveKey = (config['web.brave_api_key'] as string) || '';
 			perplexityKey = (config['web.perplexity_api_key'] as string) || '';
+			perplexityBaseUrl = (config['web.perplexity_base_url'] as string) || '';
 			ccKey = (config['web.chat_completions_api_key'] as string) || '';
 			ccBaseUrl = (config['web.chat_completions_base_url'] as string) || '';
 			ccModel = (config['web.chat_completions_model'] as string) || '';
@@ -74,6 +76,7 @@
 				'web.tavily_api_key': tavilyKey,
 				'web.brave_api_key': braveKey,
 				'web.perplexity_api_key': perplexityKey,
+				'web.perplexity_base_url': perplexityBaseUrl,
 				'web.chat_completions_api_key': ccKey,
 				'web.chat_completions_base_url': ccBaseUrl,
 				'web.chat_completions_model': ccModel,
@@ -184,6 +187,12 @@
 						<input id="pplx-key" type="password" bind:value={perplexityKey} placeholder="pplx-..."
 							class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors" />
 						<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-0.5">{$t('admin.webPerplexityHint')}</p>
+					</div>
+					<div>
+						<label class="text-xs text-gray-600 dark:text-gray-400" for="pplx-base-url">{$t('admin.webPerplexityBaseUrl')}</label>
+						<input id="pplx-base-url" type="text" bind:value={perplexityBaseUrl} placeholder="https://api.perplexity.ai"
+							class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors" />
+						<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-0.5">{$t('admin.webPerplexityBaseUrlHint')}</p>
 					</div>
 				{:else if searchProvider === 'chat_completions'}
 					<div>

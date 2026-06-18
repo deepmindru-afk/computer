@@ -48,7 +48,6 @@
 
 	async function toggleNotifications() {
 		if (!$notificationsEnabled) {
-			// Enabling: request permission
 			if ('Notification' in window) {
 				const permission = await Notification.requestPermission();
 				if (permission === 'granted') {

@@ -251,6 +251,8 @@
 	"admin.webDuckDuckGoNote": "DuckDuckGo benötigt keinen API-Schlüssel (Fallback).",
 	"admin.webPerplexityKey": "Perplexity API-Schlüssel",
 	"admin.webPerplexityHint": "API-Schlüssel unter perplexity.ai erhalten",
+	"admin.webPerplexityBaseUrl": "Basis-URL",
+	"admin.webPerplexityBaseUrlHint": "Leer lassen für api.perplexity.ai. Ändern für LiteLLM oder andere kompatible Proxys.",
 	"admin.webChatCompletions": "Chat Completions",
 	"admin.webCcBaseUrl": "Basis-URL",
 	"admin.webCcKey": "API-Schlüssel",

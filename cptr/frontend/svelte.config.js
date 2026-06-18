@@ -12,6 +12,9 @@ const config = {
 		}),
 		paths: {
 			relative: false
+		},
+		serviceWorker: {
+			register: false
 		}
 	}
 };

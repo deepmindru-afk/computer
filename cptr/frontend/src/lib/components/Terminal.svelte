@@ -51,6 +51,64 @@
 	let lastSentCols = 0;
 	let lastSentRows = 0;
 
+	// ── Wake Lock ─────────────────────────────────────────────
+	// Keeps the screen alive during terminal sessions so long-running
+	// commands (npm install, docker build) don't cause screen dimming.
+	let wakeLock: WakeLockSentinel | null = null;
+
+	async function acquireWakeLock() {
+		if (wakeLock || destroyed) return;
+		try {
+			if ('wakeLock' in navigator) {
+				wakeLock = await navigator.wakeLock.request('screen');
+				wakeLock.addEventListener('release', () => { wakeLock = null; });
+			}
+		} catch {
+			// Wake lock request can fail if document is hidden or permission denied
+		}
+	}
+
+	function releaseWakeLock() {
+		wakeLock?.release().catch(() => {});
+		wakeLock = null;
+	}
+
+	// Re-acquire wake lock when tab becomes visible again
+	function handleVisibilityChange() {
+		if (document.visibilityState === 'visible' && !destroyed) {
+			acquireWakeLock();
+		}
+	}
+
+	// ── Haptic Feedback ──────────────────────────────────────
+	// Short vibration on command completion: when PTY output pauses
+	// after sustained activity. Useful for "build finished" when
+	// phone is in pocket.
+	let lastOutputTime = 0;
+	let outputActive = false;
+	let hapticTimer: ReturnType<typeof setTimeout> | null = null;
+	const HAPTIC_PAUSE_MS = 800; // output must pause this long to trigger
+
+	function trackOutputForHaptics() {
+		const now = Date.now();
+		if (now - lastOutputTime > 2000) {
+			// Fresh burst of output after a gap - mark as active
+			outputActive = true;
+		}
+		lastOutputTime = now;
+
+		// Reset pause timer
+		if (hapticTimer) clearTimeout(hapticTimer);
+		hapticTimer = setTimeout(() => {
+			if (outputActive && document.hidden) {
+				// Output was flowing, paused, and user isn't looking - vibrate
+				if ('vibrate' in navigator) navigator.vibrate(15);
+			}
+			outputActive = false;
+			hapticTimer = null;
+		}, HAPTIC_PAUSE_MS);
+	}
+
 	function getWsUrl(sid: string): string {
 		const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 		return `${proto}//${window.location.host}/api/terminal/${sid}/ws`;
@@ -131,6 +189,17 @@
 
 	onMount(() => {
 		if (!containerEl) return;
+
+		// ── Virtual Keyboard API ────────────────────────────────
+		// In overlay mode the keyboard covers content instead of resizing
+		// the viewport, which avoids jarring layout shifts in the terminal.
+		if ('virtualKeyboard' in navigator) {
+			(navigator as any).virtualKeyboard.overlaysContent = true;
+		}
+
+		// Acquire wake lock to keep screen on during terminal session
+		acquireWakeLock();
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 
 		term = new Terminal({
 			cursorBlink: true,
@@ -323,6 +392,11 @@
 			document.removeEventListener('touchstart', onTouchStart);
 			document.removeEventListener('touchmove', onTouchMove);
 			document.removeEventListener('touchend', onTouchEnd);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			// Reset virtual keyboard mode so other views aren't affected
+			if ('virtualKeyboard' in navigator) {
+				(navigator as any).virtualKeyboard.overlaysContent = false;
+			}
 		};
 	});
 
@@ -352,6 +426,7 @@
 			// binaryType='arraybuffer' guarantees ArrayBuffer; write
 			// directly with a Uint8Array view (zero-copy wrapper)
 			term?.write(new Uint8Array(event.data as ArrayBuffer));
+			trackOutputForHaptics();
 		};
 
 		ws.onclose = (e) => {
@@ -377,7 +452,9 @@
 		destroyed = true;
 		if (resizeTimeout) clearTimeout(resizeTimeout);
 		if (reconnectTimer) clearTimeout(reconnectTimer);
+		if (hapticTimer) clearTimeout(hapticTimer);
 		resizeObserver?.disconnect();
+		releaseWakeLock();
 		ws?.close();
 		term?.dispose();
 	});

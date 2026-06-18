@@ -4,11 +4,15 @@
 	import { getWelcome } from '$lib/apis/state';
 	import { listDir } from '$lib/apis/files';
 	import Icon from './Icon.svelte';
+	import Modal from './Modal.svelte';
+	import DropdownMenu from './DropdownMenu.svelte';
 	import { t } from '$lib/i18n';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import { tooltip } from '$lib/tooltip';
 
 	interface Props {
 		onclose: () => void;
+		onselect?: (path: string) => void;
 	}
 
 	interface DirEntry {
@@ -17,7 +21,7 @@
 		modified: string | null;
 	}
 
-	let { onclose }: Props = $props();
+	let { onclose, onselect }: Props = $props();
 
 	let currentPath = $state('~');
 	let directories = $state<DirEntry[]>([]);
@@ -25,6 +29,8 @@
 	let error = $state<string | null>(null);
 	let selectedIndex = $state(-1);
 	let showHidden = $state(false);
+	let actionsMenuOpen = $state(false);
+	let actionsBtnEl: HTMLButtonElement | undefined = $state();
 	let listEl: HTMLDivElement | undefined = $state();
 	let history = $state<string[]>([]);
 
@@ -111,6 +117,11 @@
 	}
 
 	function selectCurrent() {
+		if (onselect) {
+			onselect(currentPath);
+			onclose();
+			return;
+		}
 		addWorkspace(currentPath);
 		goto(`/?workspace=${encodeURIComponent(currentPath)}`);
 		onclose();
@@ -268,183 +279,191 @@
 		const parts = currentPath.split('/').filter(Boolean);
 		return parts.length > 0 ? parts[parts.length - 1] : '/';
 	});
+
+	function toggleHidden() {
+		showHidden = !showHidden;
+	}
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-	class="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center"
-	onmousedown={onclose}
-	onkeydown={() => {}}
+<Modal
+	{onclose}
+	class="w-full max-w-[560px] mx-4 max-md:mx-0 max-md:rounded-none max-h-[480px] max-md:max-h-dvh flex flex-col mb-[6vh] max-md:mb-0"
 >
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="w-full max-w-[560px] bg-white dark:bg-[#111] dark:border dark:border-white/8 rounded-3xl max-md:rounded-none overflow-hidden shadow-2xl flex flex-col"
-		style="max-height: min(520px, 85vh);"
-		onmousedown={(e) => e.stopPropagation()}
-		onkeydown={() => {}}
-	>
-		<!-- Path bar -->
-		<div
-			class="flex items-center gap-2 px-4 h-11 border-b border-gray-200 dark:border-white/6 shrink-0"
-		>
-			{#if history.length > 0}
-				<button
-					class="flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors duration-100 shrink-0"
-					onclick={goBack}
-					aria-label={$t('directory.goBack')}
-				>
-					<Icon name="chevron-left" size={14} />
-				</button>
-			{/if}
+	<!-- Path bar -->
+	<div class="flex items-center px-3.5 pt-2.5 pb-2 gap-2 shrink-0">
+		{#if history.length > 0}
+			<button
+				class="flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors duration-100 shrink-0"
+				onclick={goBack}
+				aria-label={$t('directory.goBack')}
+			>
+				<Icon name="chevron-left" size={14} />
+			</button>
+		{/if}
 
-			{#if editingPath}
-				<div class="flex items-center gap-2 flex-1 min-w-0">
-					<input
-						bind:this={pathInputEl}
-						bind:value={pathInputValue}
-						type="text"
-						class="flex-1 border-none outline-none bg-transparent text-xs text-gray-900 dark:text-white font-mono placeholder:text-gray-400"
-						oninput={onPathInput}
-						onkeydown={handlePathKeydown}
-						onblur={() => {
-							requestAnimationFrame(() => {
-								if (editingPath) cancelEditing();
-							});
-						}}
-						spellcheck="false"
-						autocomplete="off"
-						placeholder={$t('directory.typePath')}
-					/>
-					{#if pathValid === 'checking'}
-						<Spinner size={12} />
-					{:else if pathValid === 'valid'}
-						<span class="text-green-500 shrink-0 flex"><Icon name="check" size={12} /></span>
-					{:else if pathValid === 'invalid'}
-						<span class="text-red-400 shrink-0 flex"><Icon name="xmark" size={12} /></span>
+		{#if editingPath}
+			<div class="flex items-center gap-2 flex-1 min-w-0">
+				<input
+					bind:this={pathInputEl}
+					bind:value={pathInputValue}
+					type="text"
+					class="flex-1 border-none outline-none bg-transparent text-xs text-gray-900 dark:text-white font-mono placeholder:text-gray-400"
+					oninput={onPathInput}
+					onkeydown={handlePathKeydown}
+					onblur={() => {
+						requestAnimationFrame(() => {
+							if (editingPath) cancelEditing();
+						});
+					}}
+					spellcheck="false"
+					autocomplete="off"
+					placeholder={$t('directory.typePath')}
+				/>
+				{#if pathValid === 'checking'}
+					<Spinner size={12} />
+				{:else if pathValid === 'valid'}
+					<span class="text-green-500 shrink-0 flex"><Icon name="check" size={12} /></span>
+				{:else if pathValid === 'invalid'}
+					<span class="text-red-400 shrink-0 flex"><Icon name="xmark" size={12} /></span>
+				{/if}
+				{#if tabHint}
+					<span class="text-[10px] text-gray-400 whitespace-nowrap shrink-0">{tabHint}</span>
+				{/if}
+				<span
+					class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/6 text-gray-400 shrink-0"
+					>TAB</span
+				>
+			</div>
+		{:else}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="group flex items-center gap-0.5 flex-1 min-w-0 cursor-text px-1 -mx-1"
+				role="button"
+				tabindex="0"
+				onclick={startEditing}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') startEditing();
+				}}
+			>
+				{#each breadcrumbs as seg, i (seg.path)}
+					{#if i > 1}<span class="text-gray-300 dark:text-gray-600 text-[11px] font-mono">/</span
+						>{/if}
+					{#if i === breadcrumbs.length - 1}
+						<span
+							class="text-[11px] font-mono text-gray-900 dark:text-white whitespace-nowrap overflow-hidden text-ellipsis"
+							>{seg.name}</span
+						>
+					{:else}
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<span
+							class="text-[11px] font-mono text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 whitespace-nowrap shrink-0 cursor-pointer px-0.5 transition-colors duration-75"
+							role="button"
+							tabindex="-1"
+							onclick={(e) => {
+								e.stopPropagation();
+								navigateToPath(seg.path);
+							}}
+							onkeydown={() => {}}>{seg.name}</span
+						>
 					{/if}
-					{#if tabHint}
-						<span class="text-[10px] text-gray-400 whitespace-nowrap shrink-0">{tabHint}</span>
-					{/if}
-					<span
-						class="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/6 text-gray-400 shrink-0"
-						>TAB</span
-					>
-				</div>
-			{:else}
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div
-					class="group flex items-center gap-0.5 flex-1 min-w-0 cursor-text rounded-md px-1 -mx-1 transition-colors duration-100 hover:bg-gray-50 dark:hover:bg-white/4"
-					role="button"
-					tabindex="0"
-					onclick={startEditing}
-					onkeydown={(e) => {
-						if (e.key === 'Enter') startEditing();
+				{/each}
+				<span
+					class="ml-1 text-gray-300 dark:text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0 flex items-center"
+				>
+					<Icon name="pencil" size={10} />
+				</span>
+			</div>
+		{/if}
+
+		<button
+			bind:this={actionsBtnEl}
+			class="flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200/70 dark:hover:bg-white/8 transition-colors duration-100 shrink-0"
+			onclick={() => {
+				actionsMenuOpen = !actionsMenuOpen;
+			}}
+			use:tooltip={$t('files.actions')}
+			aria-label={$t('files.actions')}
+		>
+			<Icon name="three-dots" size={12} />
+		</button>
+	</div>
+
+	<!-- Directory listing -->
+	<div bind:this={listEl} class="overflow-y-auto px-1.5 pb-1.5 flex-1 min-h-0">
+		{#if loading}
+			<div class="flex items-center justify-center py-8">
+				<Spinner size={16} />
+			</div>
+		{:else if error}
+			<div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
+				<p class="text-xs text-red-400">{error}</p>
+				<button
+					class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1 rounded-lg bg-gray-100 dark:bg-white/6 transition-colors duration-100"
+					onclick={() => fetchDirectories(currentPath)}>{$t('directory.retry')}</button
+				>
+			</div>
+		{:else if filteredDirs.length === 0}
+			<div class="flex flex-col items-center justify-center py-8">
+				<p class="text-xs text-gray-400 dark:text-gray-600">{$t('directory.noSubdirectories')}</p>
+			</div>
+		{:else}
+			{#each filteredDirs as dir, i (dir.name)}
+				<button
+					data-index={i}
+					class="flex items-center gap-2 w-full h-7 px-2 rounded-xl text-left transition-colors duration-75
+							{i === selectedIndex
+						? 'bg-gray-200/50 text-gray-900 dark:bg-white/6 dark:text-white'
+						: 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/4'}"
+					onclick={() => navigateTo(dir.name)}
+					ondblclick={(e) => {
+						e.stopPropagation();
+						const fullPath = currentPath === '/' ? `/${dir.name}` : `${currentPath}/${dir.name}`;
+						addWorkspace(fullPath);
+						goto(`/?workspace=${encodeURIComponent(fullPath)}`);
+						onclose();
+					}}
+					onmouseenter={() => {
+						selectedIndex = i;
 					}}
 				>
-					{#each breadcrumbs as seg, i (seg.path)}
-						{#if i > 1}<span class="text-gray-300 dark:text-gray-600 text-[11px] font-mono">/</span
-							>{/if}
-						{#if i === breadcrumbs.length - 1}
-							<span
-								class="text-[11px] font-mono font-medium text-gray-900 dark:text-white whitespace-nowrap overflow-hidden text-ellipsis"
-								>{seg.name}</span
-							>
-						{:else}
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<span
-								class="text-[11px] font-mono text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 whitespace-nowrap shrink-0 cursor-pointer rounded px-0.5 hover:bg-gray-200 dark:hover:bg-white/8 transition-colors duration-75"
-								role="button"
-								tabindex="-1"
-								onclick={(e) => {
-									e.stopPropagation();
-									navigateToPath(seg.path);
-								}}
-								onkeydown={() => {}}>{seg.name}</span
-							>
-						{/if}
-					{/each}
-					<span
-						class="ml-1 text-gray-300 dark:text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0 flex items-center"
-					>
-						<Icon name="pencil" size={10} />
-					</span>
-				</div>
-			{/if}
-
-			<label class="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
-				<input type="checkbox" bind:checked={showHidden} class="w-3 h-3 rounded accent-gray-500" />
-				<span class="text-[10px] text-gray-400">{$t('directory.hidden')}</span>
-			</label>
-		</div>
-
-		<!-- Directory listing -->
-		<div bind:this={listEl} class="flex-1 overflow-y-auto p-1 min-h-0">
-			{#if loading}
-				<div class="flex items-center justify-center py-8">
-					<Spinner size={16} />
-				</div>
-			{:else if error}
-				<div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-					<p class="text-xs text-red-400">{error}</p>
-					<button
-						class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1 rounded-lg bg-gray-100 dark:bg-white/6 transition-colors duration-100"
-						onclick={() => fetchDirectories(currentPath)}>{$t('directory.retry')}</button
-					>
-				</div>
-			{:else if filteredDirs.length === 0}
-				<div class="flex flex-col items-center justify-center py-8">
-					<p class="text-xs text-gray-400 dark:text-gray-600">{$t('directory.noSubdirectories')}</p>
-				</div>
-			{:else}
-				{#each filteredDirs as dir, i (dir.name)}
-					<button
-						data-index={i}
-						class="flex items-center gap-2 w-full h-7 px-2 rounded-lg text-left transition-colors duration-75
-							{i === selectedIndex
-							? 'bg-gray-200/50 text-gray-900 dark:bg-white/6 dark:text-white'
-							: 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/4'}"
-						onclick={() => navigateTo(dir.name)}
-						ondblclick={(e) => {
-							e.stopPropagation();
-							const fullPath = currentPath === '/' ? `/${dir.name}` : `${currentPath}/${dir.name}`;
-							addWorkspace(fullPath);
-							goto(`/?workspace=${encodeURIComponent(fullPath)}`);
-							onclose();
-						}}
-						onmouseenter={() => {
-							selectedIndex = i;
-						}}
-					>
-						<Icon name="folder" size={14} class="shrink-0 text-gray-400" />
-						<span class="flex-1 truncate text-xs">{dir.name}</span>
-						<Icon
-							name="chevron-right"
-							size={12}
-							class="shrink-0 text-gray-300 dark:text-gray-700"
-						/>
-					</button>
-				{/each}
-			{/if}
-		</div>
-
-		<!-- Footer -->
-		<div
-			class="flex items-center gap-2 px-3 py-2 border-t border-gray-200 dark:border-white/6 shrink-0"
-		>
-			<span
-				class="flex-1 text-[11px] text-gray-400 dark:text-gray-600 font-mono truncate min-w-0"
-				title={currentPath}>{currentPath}</span
-			>
-			<button
-				class="text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 rounded-lg transition-colors duration-100 shrink-0"
-				onclick={onclose}>{$t('directory.cancel')}</button
-			>
-			<button
-				class="text-xs font-medium text-white dark:text-black bg-gray-900 dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors duration-100 shrink-0"
-				onclick={selectCurrent}>{$t('directory.open', { name: currentFolderName })}</button
-			>
-		</div>
+					<Icon name="folder" size={14} class="shrink-0 text-gray-400" />
+					<span class="flex-1 truncate text-xs">{dir.name}</span>
+					<Icon name="chevron-right" size={12} class="shrink-0 text-gray-300 dark:text-gray-700" />
+				</button>
+			{/each}
+		{/if}
 	</div>
-</div>
+
+	<!-- Footer -->
+	<div class="flex items-center gap-2 px-3.5 pb-3 pt-1 shrink-0">
+		<span
+			class="flex-1 text-[11px] text-gray-400 dark:text-gray-600 font-mono truncate min-w-0"
+			title={currentPath}>{currentPath}</span
+		>
+		<button
+			class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5 rounded-lg transition-colors duration-100 shrink-0"
+			onclick={onclose}>{$t('directory.cancel')}</button
+		>
+		<button
+			class="text-xs text-white dark:text-black bg-gray-900 dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors duration-100 shrink-0"
+			onclick={selectCurrent}>{$t('directory.open', { name: currentFolderName })}</button
+		>
+	</div>
+</Modal>
+
+{#if actionsMenuOpen && actionsBtnEl}
+	<DropdownMenu
+		anchor={actionsBtnEl}
+		align="end"
+		items={[
+			{
+				label: showHidden ? $t('files.hideHidden') : $t('files.showHidden'),
+				icon: 'eye',
+				onclick: () => toggleHidden()
+			}
+		]}
+		onclose={() => (actionsMenuOpen = false)}
+	/>
+{/if}

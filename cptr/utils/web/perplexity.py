@@ -9,11 +9,16 @@ from __future__ import annotations
 import httpx
 
 
-async def search(query: str, api_key: str, count: int = 5) -> str:
+async def search(
+    query: str,
+    api_key: str,
+    count: int = 5,
+    base_url: str = "https://api.perplexity.ai",
+) -> str:
     """Search using Perplexity's dedicated search API."""
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(
-            "https://api.perplexity.ai/search",
+            f"{base_url.rstrip('/')}/search",
             json={"query": query},
             headers={
                 "Authorization": f"Bearer {api_key}",

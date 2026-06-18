@@ -251,6 +251,8 @@
 	"admin.webDuckDuckGoNote": "DuckDuckGo는 API 키가 필요 없습니다(대체).",
 	"admin.webPerplexityKey": "Perplexity API 키",
 	"admin.webPerplexityHint": "perplexity.ai에서 API 키를 받으세요",
+	"admin.webPerplexityBaseUrl": "기본 URL",
+	"admin.webPerplexityBaseUrlHint": "api.perplexity.ai를 사용하려면 비워두세요. LiteLLM 또는 기타 호환 프록시의 경우 변경하세요.",
 	"admin.webChatCompletions": "Chat Completions",
 	"admin.webCcBaseUrl": "기본 URL",
 	"admin.webCcKey": "API 키",

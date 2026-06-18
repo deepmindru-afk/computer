@@ -251,6 +251,8 @@
 	"admin.webDuckDuckGoNote": "DuckDuckGo не требует API-ключа (резервный вариант).",
 	"admin.webPerplexityKey": "API-ключ Perplexity",
 	"admin.webPerplexityHint": "Получите API-ключ на perplexity.ai",
+	"admin.webPerplexityBaseUrl": "Базовый URL",
+	"admin.webPerplexityBaseUrlHint": "Оставьте пустым для api.perplexity.ai. Измените для LiteLLM или других совместимых прокси.",
 	"admin.webChatCompletions": "Chat Completions",
 	"admin.webCcBaseUrl": "Базовый URL",
 	"admin.webCcKey": "API-ключ",

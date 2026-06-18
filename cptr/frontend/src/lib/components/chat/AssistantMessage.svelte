@@ -118,6 +118,18 @@
 		}, 1500);
 	}
 
+	function shareContent() {
+		const text =
+			(output || [])
+				.filter((i: any) => i.type === 'message')
+				.flatMap((i: any) => i.content || [])
+				.map((c: any) => c.text)
+				.join('') || content;
+		if ('share' in navigator) {
+			navigator.share({ text }).catch(() => {});
+		}
+	}
+
 	/** Shorten a file path to just the basename for compact display */
 	function shortPath(p: string | undefined): string {
 		if (!p) return '?';
@@ -624,6 +636,22 @@
 							</div>
 						{/if}
 					</div>
+				{/if}
+				{#if done && 'share' in navigator}
+					<button
+						class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
+						onclick={shareContent}
+						aria-label={$t('chat.share')}
+					>
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+							><path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12M12 4l-4 4M12 4l4 4"
+							/></svg
+						>
+					</button>
 				{/if}
 			</div>
 		{/if}

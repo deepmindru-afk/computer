@@ -519,7 +519,7 @@ async def upload_file(
     if not target_dir.is_dir():
         raise HTTPException(status_code=400, detail=f"Not a directory: {directory}")
 
-    target = target_dir / file.filename
+    target = _unique_child_path(target_dir, file.filename or "file")
     try:
         content = await file.read()
         await asyncio.to_thread(target.write_bytes, content)
@@ -527,6 +527,21 @@ async def upload_file(
         raise HTTPException(status_code=403, detail=str(e))
 
     return {"status": "uploaded", "path": str(target), "size": len(content)}
+
+
+def _unique_child_path(directory: Path, filename: str) -> Path:
+    """Return a non-existing child path by appending -2, -3, ... on collisions."""
+    safe_name = Path(filename).name or "file"
+    target = directory / safe_name
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    for i in range(2, 10_000):
+        candidate = directory / f"{stem}-{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise HTTPException(status_code=409, detail=f"Could not find available name for: {filename}")
 
 
 # ── File viewing (inline) ────────────────────────────────────────

@@ -2,7 +2,7 @@
 
 Priority in auto mode:
 1. Exa        (EXA_API_KEY or web.exa_api_key)
-2. Perplexity (PERPLEXITY_API_KEY or web.perplexity_api_key)
+2. Perplexity (PERPLEXITY_API_KEY or web.perplexity_api_key, optional PERPLEXITY_BASE_URL or web.perplexity_base_url)
 3. Tavily     (TAVILY_API_KEY or web.tavily_api_key)
 4. Brave      (BRAVE_API_KEY or web.brave_api_key)
 5. DuckDuckGo (zero-config fallback)
@@ -52,6 +52,9 @@ async def web_search_handler(query: str) -> str:
 
     exa_key = await _get_key("EXA_API_KEY", "web.exa_api_key")
     perplexity_key = await _get_key("PERPLEXITY_API_KEY", "web.perplexity_api_key")
+    perplexity_url = (
+        await _get_config("web.perplexity_base_url")
+    ) or os.environ.get("PERPLEXITY_BASE_URL", "")
     tavily_key = await _get_key("TAVILY_API_KEY", "web.tavily_api_key")
     brave_key = await _get_key("BRAVE_API_KEY", "web.brave_api_key")
     cc_key = await _get_key("CHAT_COMPLETIONS_SEARCH_API_KEY", "web.chat_completions_api_key")
@@ -72,7 +75,7 @@ async def web_search_handler(query: str) -> str:
             elif provider == "perplexity":
                 if not perplexity_key:
                     return "Error: Perplexity API key not configured."
-                return await perplexity.search(query, perplexity_key)
+                return await perplexity.search(query, perplexity_key, base_url=perplexity_url) if perplexity_url else await perplexity.search(query, perplexity_key)
             elif provider == "tavily":
                 if not tavily_key:
                     return "Error: Tavily API key not configured."
@@ -98,7 +101,8 @@ async def web_search_handler(query: str) -> str:
     if exa_key:
         providers.append(("exa", lambda: exa.search(query, exa_key)))
     if perplexity_key:
-        providers.append(("perplexity", lambda: perplexity.search(query, perplexity_key)))
+        _pplx_kw = {"base_url": perplexity_url} if perplexity_url else {}
+        providers.append(("perplexity", lambda: perplexity.search(query, perplexity_key, **_pplx_kw)))
     if tavily_key:
         providers.append(("tavily", lambda: tavily.search(query, tavily_key)))
     if brave_key:

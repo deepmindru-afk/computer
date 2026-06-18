@@ -251,6 +251,8 @@
 	"admin.webDuckDuckGoNote": "DuckDuckGo não exige chave de API (fallback).",
 	"admin.webPerplexityKey": "Chave de API do Perplexity",
 	"admin.webPerplexityHint": "Obtenha sua chave de API em perplexity.ai",
+	"admin.webPerplexityBaseUrl": "URL base",
+	"admin.webPerplexityBaseUrlHint": "Deixe em branco para api.perplexity.ai. Altere para LiteLLM ou outros proxies compatíveis.",
 	"admin.webChatCompletions": "Chat Completions",
 	"admin.webCcBaseUrl": "URL base",
 	"admin.webCcKey": "Chave de API",

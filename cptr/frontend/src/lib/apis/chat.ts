@@ -28,9 +28,18 @@ export interface ChatInfo {
 	is_active?: boolean;
 }
 
+export interface ContextUsage {
+	tokens: number;
+	estimated_tokens: number;
+	threshold: number;
+	percent: number;
+	source: 'estimated';
+}
+
 export interface ChatDetail {
 	chat: ChatInfo;
 	messages: ChatMessageRow[];
+	context_usage?: ContextUsage | null;
 }
 
 export interface SendMessageResult {
@@ -48,6 +57,16 @@ export interface ChatSendParams {
 	voice_mode?: boolean;
 }
 
+export interface CompactChatResult {
+	ok: boolean;
+	compacted: boolean;
+	reason?: string;
+	dropped_messages?: number;
+	kept_messages?: number;
+	summary_chars?: number;
+	context_usage?: ContextUsage | null;
+}
+
 // ── Queries ─────────────────────────────────────────────────
 
 export const getChats = (
@@ -61,7 +80,10 @@ export const getChats = (
 		`/api/chats?workspace=${encodeURIComponent(workspace)}&limit=${limit}&offset=${offset}&sort_by=${sortBy}&sort_dir=${sortDir}`
 	);
 
-export const getChat = (chatId: string) => fetchJSON<ChatDetail>(`/api/chats/${chatId}`);
+export const getChat = (chatId: string, modelId?: string) => {
+	const suffix = modelId ? `?model_id=${encodeURIComponent(modelId)}` : '';
+	return fetchJSON<ChatDetail>(`/api/chats/${chatId}${suffix}`);
+};
 
 export const deleteChat = (chatId: string) =>
 	fetchJSON<{ ok: boolean }>(`/api/chats/${chatId}`, { method: 'DELETE' });
@@ -105,6 +127,9 @@ export const approveToolCall = (
 
 export const cancelTask = (chatId: string, messageId: string) =>
 	fetchJSON(`/api/chats/${chatId}/messages/${messageId}/cancel`, { method: 'POST' });
+
+export const compactChat = (chatId: string, modelId: string) =>
+	fetchJSON<CompactChatResult>(`/api/chats/${chatId}/compact`, jsonBody({ model_id: modelId }));
 
 export const updateCurrentMessage = (chatId: string, messageId: string) =>
 	fetchJSON<{ ok: boolean }>(`/api/chats/${chatId}/current`, jsonBody({ message_id: messageId }));

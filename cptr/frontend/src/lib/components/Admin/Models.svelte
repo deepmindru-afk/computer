@@ -58,8 +58,6 @@
 
 	const DEFAULT_PROMPT_PLACEHOLDER = `You are a helpful coding assistant. You have access to tools to read, search, and modify files in the workspace. Use them to help the user with their coding tasks.
 
-For complex tasks, create an implementation plan first using create_artifact. Then wait for an explicit approval message before using tools or implementing.
-
 {{INSTRUCTIONS}}
 
 Workspace: {{WORKSPACE_NAME}}

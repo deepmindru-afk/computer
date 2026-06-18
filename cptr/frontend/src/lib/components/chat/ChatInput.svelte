@@ -16,6 +16,7 @@
 	import { searchFiles } from '$lib/apis/files';
 	import { getSkills } from '$lib/apis/skills';
 	import { uploadFile } from '$lib/apis/files';
+	import type { ContextUsage } from '$lib/apis/chat';
 	import ModelSelector from '../common/ModelSelector.svelte';
 	import SendButton from './SendButton.svelte';
 	import PlusMenu from './PlusMenu.svelte';
@@ -34,6 +35,24 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { t } from '$lib/i18n';
 
+	// Keep screen awake during voice mode conversations
+	let voiceWakeLock: WakeLockSentinel | null = null;
+
+	async function acquireVoiceWakeLock() {
+		if (voiceWakeLock) return;
+		try {
+			if ('wakeLock' in navigator) {
+				voiceWakeLock = await navigator.wakeLock.request('screen');
+				voiceWakeLock.addEventListener('release', () => { voiceWakeLock = null; });
+			}
+		} catch {}
+	}
+
+	function releaseVoiceWakeLock() {
+		voiceWakeLock?.release().catch(() => {});
+		voiceWakeLock = null;
+	}
+
 	interface Props {
 		inputText: string;
 		selectedModel: string;
@@ -41,8 +60,12 @@
 		streaming?: boolean;
 		workspace?: string;
 		placeholder?: string;
+		contextUsage?: ContextUsage | null;
 		queuedMessages?: { id: string; content: string }[];
 		onsend: () => void;
+		oncompact?: () => void;
+		onplan?: () => void;
+		onstatus?: () => void;
 		oncancel?: () => void;
 		onqueuesendnow?: (id: string) => void;
 		onqueueedit?: (id: string) => void;
@@ -55,8 +78,12 @@
 		streaming = false,
 		workspace = '',
 		placeholder = 'Message...',
+		contextUsage = null,
 		queuedMessages = [],
 		onsend,
+		oncompact,
+		onplan,
+		onstatus,
 		oncancel,
 		onqueuesendnow,
 		onqueueedit,
@@ -76,6 +103,7 @@
 	let voiceCaptureStream: MediaStream | null = null;
 	let voiceCaptureChunks: Blob[] = [];
 	let voiceCaptureMimeType = 'audio/webm';
+	let selectedSlashCommandIndex = $state(0);
 	const voiceModeAvailable = $derived(
 		$ttsEnabled && $ttsConfigured && ($voiceModeSttMode === 'browser' || $sttConfigured)
 	);
@@ -485,6 +513,26 @@
 					spellcheck: 'true'
 				},
 				handleKeyDown: (view, event) => {
+					if (showSlashCommands) {
+						if (event.key === 'ArrowDown') {
+							event.preventDefault();
+							selectedSlashCommandIndex =
+								(selectedSlashCommandIndex + 1) % Math.max(slashCommandIds.length, 1);
+							return true;
+						}
+						if (event.key === 'ArrowUp') {
+							event.preventDefault();
+							selectedSlashCommandIndex =
+								(selectedSlashCommandIndex - 1 + slashCommandIds.length) %
+								Math.max(slashCommandIds.length, 1);
+							return true;
+						}
+						if (event.key === 'Enter') {
+							event.preventDefault();
+							runSlashCommand(slashCommandIds[selectedSlashCommandIndex]);
+							return true;
+						}
+					}
 					if (event.key === 'Enter' && !event.shiftKey) {
 						// Don't send while suggestion popup is open — let it confirm selection
 						if (popupComponent || skillPopupComponent) return false;
@@ -501,7 +549,7 @@
 						}
 						if (!inside) {
 							event.preventDefault();
-							onsend();
+							handleSubmit();
 							return true;
 						}
 					}
@@ -517,6 +565,7 @@
 	onDestroy(() => {
 		stopVoiceRecognition();
 		if (voiceRestartTimer) clearTimeout(voiceRestartTimer);
+		releaseVoiceWakeLock();
 		destroyPopup();
 		destroySkillPopup();
 		editor?.destroy();
@@ -768,7 +817,7 @@
 			}
 			inputText = text;
 			await tick();
-			onsend();
+			handleSubmit();
 		};
 
 		recognition.onerror = (event: any) => {
@@ -810,10 +859,12 @@
 		voiceModeEnabled.set(next);
 		if (next) {
 			void unlockTtsAudioPlayback();
+			void acquireVoiceWakeLock();
 			voiceWaitingForResponse = false;
 			voiceSawStreaming = false;
 			startVoiceRecognition();
 		} else {
+			releaseVoiceWakeLock();
 			voiceWaitingForResponse = false;
 			voiceSawStreaming = false;
 			stopVoiceRecognition();
@@ -839,6 +890,48 @@
 			stopVoiceRecognition();
 		}
 	});
+
+	const slashCommandQuery = $derived(inputText.trim().toLowerCase());
+	const slashCommandIds = $derived.by(() => {
+		if (!slashCommandQuery.startsWith('/')) return [];
+		const ids: string[] = [];
+		if (oncompact && '/compact'.startsWith(slashCommandQuery)) ids.push('compact');
+		if (onplan && '/plan'.startsWith(slashCommandQuery)) ids.push('plan');
+		if (onstatus && '/status'.startsWith(slashCommandQuery)) ids.push('status');
+		return ids;
+	});
+	const showSlashCommands = $derived(slashCommandIds.length > 0);
+	const contextPercent = $derived(Math.max(0, Math.round(contextUsage?.percent ?? 0)));
+	const contextCirclePercent = $derived(Math.min(contextPercent, 100));
+	const contextCircleOffset = $derived(50.27 * (1 - contextCirclePercent / 100));
+
+	$effect(() => {
+		if (selectedSlashCommandIndex >= slashCommandIds.length) selectedSlashCommandIndex = 0;
+	});
+
+	function runSlashCommand(commandId: string | undefined) {
+		if (commandId === 'compact' && (sending || streaming)) return;
+		if (commandId === 'compact' && oncompact) {
+			inputText = '';
+			oncompact();
+			return;
+		}
+		if (commandId === 'plan' && onplan) {
+			inputText = '';
+			onplan();
+			return;
+		}
+		if (commandId === 'status' && onstatus) {
+			inputText = '';
+			onstatus();
+			return;
+		}
+		onsend();
+	}
+
+	function handleSubmit() {
+		runSlashCommand(slashCommandIds[0]);
+	}
 
 	// Allow sending during streaming (message will be enqueued server-side)
 	const canSend = $derived(!!(inputText.trim() && selectedModel && !sending));
@@ -866,6 +959,136 @@
 					ondelete={onqueuedelete ?? (() => {})}
 				/>
 			{/each}
+		</div>
+	{/if}
+
+	{#if showSlashCommands}
+		<div
+			class="absolute left-2 bottom-full mb-1 z-50 w-60 max-h-40 overflow-y-auto rounded-xl bg-white dark:bg-[#1a1a1a] border border-gray-150 dark:border-white/6 shadow-xl p-0.5"
+		>
+			<div class="mb-0.5 px-2 pt-1 pb-0.5 text-[10px] leading-none text-gray-400 dark:text-gray-600">
+				Commands
+			</div>
+			{#if slashCommandIds.includes('compact')}
+				<button
+					type="button"
+					class="flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
+						{slashCommandIds[selectedSlashCommandIndex] === 'compact'
+						? 'bg-gray-50 dark:bg-white/5 text-gray-900 dark:text-white'
+						: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'} disabled:opacity-50"
+					disabled={sending || streaming}
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => {
+						runSlashCommand('compact');
+					}}
+					onmouseenter={() => (selectedSlashCommandIndex = slashCommandIds.indexOf('compact'))}
+				>
+					<span class="flex items-center justify-center w-4 shrink-0 text-gray-400 dark:text-gray-500">
+						<svg class="size-3.5 -rotate-90" viewBox="0 0 20 20" aria-hidden="true">
+							<circle
+								cx="10"
+								cy="10"
+								r="8"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								class="opacity-20"
+							/>
+							<circle
+								cx="10"
+								cy="10"
+								r="8"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-dasharray="50.27"
+								style={`stroke-dashoffset: ${contextCircleOffset};`}
+							/>
+						</svg>
+					</span>
+					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
+						<span class="truncate">{$t('chat.commandCompact')}</span>
+						<span class="text-[10px] text-gray-400 dark:text-gray-600 truncate shrink-0">
+							{$t('chat.commandCompactPercent', { percent: contextPercent })}
+						</span>
+					</span>
+				</button>
+			{/if}
+			{#if slashCommandIds.includes('plan')}
+				<button
+					type="button"
+					class="flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
+						{slashCommandIds[selectedSlashCommandIndex] === 'plan'
+						? 'bg-gray-50 dark:bg-white/5 text-gray-900 dark:text-white'
+						: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => {
+						runSlashCommand('plan');
+					}}
+					onmouseenter={() => (selectedSlashCommandIndex = slashCommandIds.indexOf('plan'))}
+				>
+					<span class="flex items-center justify-center w-4 shrink-0 text-gray-400 dark:text-gray-500">
+						<svg
+							class="size-3.5"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.75"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+							<polyline points="14 2 14 8 20 8" />
+							<line x1="9" y1="13" x2="15" y2="13" />
+							<line x1="9" y1="17" x2="15" y2="17" />
+						</svg>
+					</span>
+					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
+						<span class="truncate">{$t('chat.commandPlan')}</span>
+						<span class="text-[10px] text-gray-400 dark:text-gray-600 truncate shrink-0">
+							{$planMode ? $t('chat.commandPlanOn') : $t('chat.commandPlanOff')}
+						</span>
+					</span>
+				</button>
+			{/if}
+			{#if slashCommandIds.includes('status')}
+				<button
+					type="button"
+					class="flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
+						{slashCommandIds[selectedSlashCommandIndex] === 'status'
+						? 'bg-gray-50 dark:bg-white/5 text-gray-900 dark:text-white'
+						: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => {
+						runSlashCommand('status');
+					}}
+					onmouseenter={() => (selectedSlashCommandIndex = slashCommandIds.indexOf('status'))}
+				>
+					<span class="flex items-center justify-center w-4 shrink-0 text-gray-400 dark:text-gray-500">
+						<svg
+							class="size-3.5"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.75"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M12 14l4-4" />
+							<path d="M3.34 19a10 10 0 1 1 17.32 0" />
+						</svg>
+					</span>
+					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
+						<span class="truncate">{$t('chat.commandStatus')}</span>
+						<span class="text-[10px] text-gray-400 dark:text-gray-600 truncate shrink-0">
+							{$t('chat.commandStatusDesc')}
+						</span>
+					</span>
+				</button>
+			{/if}
 		</div>
 	{/if}
 
@@ -993,7 +1216,7 @@
 				<SendButton
 					{canSend}
 					{streaming}
-					{onsend}
+					onsend={handleSubmit}
 					{oncancel}
 					onvoice={voiceModeAvailable ? toggleVoiceMode : undefined}
 					voiceActive={$voiceModeEnabled || voiceListening}

@@ -251,6 +251,8 @@
 	"admin.webDuckDuckGoNote": "DuckDuckGo 不需要 API 金鑰（備用）。",
 	"admin.webPerplexityKey": "Perplexity API 金鑰",
 	"admin.webPerplexityHint": "在 perplexity.ai 取得你的 API 金鑰",
+	"admin.webPerplexityBaseUrl": "基礎 URL",
+	"admin.webPerplexityBaseUrlHint": "留空使用 api.perplexity.ai。如使用 LiteLLM 或其他相容代理請修改。",
 	"admin.webChatCompletions": "Chat Completions",
 	"admin.webCcBaseUrl": "基礎 URL",
 	"admin.webCcKey": "API 金鑰",

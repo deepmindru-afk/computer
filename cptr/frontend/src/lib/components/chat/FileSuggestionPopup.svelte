@@ -34,19 +34,21 @@
 </script>
 
 <div
-	class="fixed z-50 w-64 max-h-40 overflow-y-auto rounded-xl bg-white dark:bg-[#1a1a1a] border border-gray-150 dark:border-white/6 shadow-xl p-0.5"
+	class="fixed z-50 w-60 max-h-40 overflow-y-auto rounded-xl bg-white dark:bg-[#1a1a1a] border border-gray-150 dark:border-white/6 shadow-xl p-0.5"
 >
 	{#if items.length === 0}
-		<div class="px-3 py-2 text-xs text-gray-400 dark:text-gray-600">No files found</div>
+		<div class="flex items-center h-6 px-2 text-xs text-gray-400 dark:text-gray-600">
+			No files found
+		</div>
 	{:else}
-		<div class="text-[10px] text-gray-400 dark:text-gray-600 px-2.5 pt-1.5 pb-0.5">
+		<div class="mb-0.5 px-2 pt-1 pb-0.5 text-[10px] leading-none text-gray-400 dark:text-gray-600">
 			Files
 		</div>
 		<div bind:this={listEl}>
 			{#each items as item, i (item.id)}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<button
-					class="flex items-center gap-2 w-full h-7 px-2 rounded-xl text-xs text-left transition-colors duration-75
+					class="flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
 						{i === selectedIndex
 						? 'bg-gray-50 dark:bg-white/5 text-gray-900 dark:text-white'
 						: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}"
@@ -61,7 +63,7 @@
 							? 'text-gray-500 dark:text-gray-400'
 							: 'text-gray-400 dark:text-gray-500'}"
 					>
-						<Icon name={fileIconName(item.label, item.type)} size={12} />
+						<Icon name={fileIconName(item.label, item.type)} size={14} />
 					</span>
 					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
 						<span class="truncate">{item.label}</span>

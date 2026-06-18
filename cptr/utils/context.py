@@ -1,8 +1,4 @@
-"""Context estimation for chat compaction.
-
-Uses a character-based heuristic (len/4) to estimate token counts.
-A follow-up will add real usage data from API responses for precision.
-"""
+"""Context usage helpers for chat compaction."""
 
 from __future__ import annotations
 
@@ -60,6 +56,26 @@ def should_compact(
     # Full estimation fallback
     total = estimate_tokens(system_prompt) + estimate_messages_tokens(messages)
     return total > threshold
+
+
+def build_context_usage(tokens: int, *, threshold: int | None = None, source: str) -> dict:
+    """Return context fullness stats for estimated token counts."""
+    resolved_threshold = threshold or _get_threshold()
+    percent = round((tokens / resolved_threshold) * 100) if resolved_threshold > 0 else 0
+    return {
+        "tokens": tokens,
+        "estimated_tokens": tokens,
+        "threshold": resolved_threshold,
+        "percent": max(0, percent),
+        "source": source,
+    }
+
+
+def estimate_context_usage(messages: list[dict], system_prompt: str) -> dict:
+    """Return context fullness stats using the same estimate as compaction."""
+    threshold = _get_threshold()
+    estimated_tokens = estimate_tokens(system_prompt) + estimate_messages_tokens(messages)
+    return build_context_usage(estimated_tokens, threshold=threshold, source="estimated")
 
 
 def _get_threshold() -> int:

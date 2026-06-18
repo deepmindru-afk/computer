@@ -1,11 +1,16 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { markTabUnsaved, updateTabFilePath, activeWorkspace } from '$lib/stores';
+	import {
+		clearTabEdit,
+		markTabUnsaved,
+		updateTabFilePath,
+		activeWorkspace
+	} from '$lib/stores';
 	import { get } from 'svelte/store';
 	import { tooltip } from '$lib/tooltip';
 	import { readFile, writeFile } from '$lib/apis/files';
 	import { getGitDiff } from '$lib/apis/git';
-	import { gitStatusStore } from '$lib/stores/gitStatus.svelte';
+	import { gitStatusStore, type GitFile } from '$lib/stores/gitStatus.svelte';
 	import Icon from './Icon.svelte';
 	import SaveDialog from './SaveDialog.svelte';
 	import type RichTextEditorType from './markdown/RichTextEditor.svelte';
@@ -19,16 +24,25 @@
 	import SvgPreview from './preview/SvgPreview.svelte';
 	import OfficePreview from './preview/OfficePreview.svelte';
 	import Spinner from './common/Spinner.svelte';
-	import { EditorState } from '@codemirror/state';
+	import {
+		EditorState,
+		StateEffect,
+		StateField,
+		RangeSetBuilder,
+		type RangeSet
+	} from '@codemirror/state';
 	import {
 		EditorView,
+		GutterMarker,
 		keymap,
 		lineNumbers,
+		gutterLineClass,
 		highlightActiveLineGutter,
 		highlightSpecialChars,
 		drawSelection,
 		highlightActiveLine,
-		rectangularSelection
+		rectangularSelection,
+		type ViewUpdate
 	} from '@codemirror/view';
 	import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 	import {
@@ -40,7 +54,13 @@
 		foldKeymap,
 		StreamLanguage
 	} from '@codemirror/language';
-	import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+	import {
+		autocompletion,
+		closeBrackets,
+		closeBracketsKeymap,
+		completeAnyWord,
+		completionKeymap
+	} from '@codemirror/autocomplete';
 	import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 	import { oneDark } from '@codemirror/theme-one-dark';
 
@@ -61,9 +81,10 @@
 	interface Props {
 		filePath: string;
 		tabId: string;
+		edit?: boolean;
 	}
 
-	let { filePath, tabId }: Props = $props();
+	let { filePath, tabId, edit = false }: Props = $props();
 
 	interface FileData {
 		path: string;
@@ -122,6 +143,7 @@
 	// Markdown mode: preview (read-only), editor (WYSIWYG), raw (CodeMirror source)
 	type MarkdownMode = 'preview' | 'editor' | 'raw';
 	let markdownMode = $state<MarkdownMode>('preview');
+	let openedInEdit = $state(false);
 
 	// Rich text editor, lazy loaded
 	let RichTextEditor: typeof RichTextEditorType | null = $state(null);
@@ -141,10 +163,93 @@
 	type DiffFileEntry = { path: string; hunks: DiffHunk[] };
 	type NumberedLine = DiffLine & { oldNumber: number | null; newNumber: number | null };
 	type LineGroup = { type: DiffLine['type']; lines: NumberedLine[] };
+	type GitLineChange = { line: number; type: 'added' | 'modified' };
 	let diffMode = $state(false);
 	let diffFiles = $state<DiffFileEntry[]>([]);
 	let diffLoading = $state(false);
 	let hasGitChanges = $state(false);
+	let gitLineChanges: GitLineChange[] = [];
+	let gitBaseContent: string | null = null;
+	let gitLineRefreshSeq = 0;
+	let lastGitLineRefreshKey = '';
+
+	const setGitLineChangesEffect = StateEffect.define<GitLineChange[]>();
+
+	class GitChangeMarker extends GutterMarker {
+		readonly type: GitLineChange['type'];
+		readonly elementClass: string;
+
+		constructor(type: GitLineChange['type']) {
+			super();
+			this.type = type;
+			this.elementClass = `cm-git-line-${type}`;
+		}
+
+		eq(other: GutterMarker) {
+			return other instanceof GitChangeMarker && other.type === this.type;
+		}
+	}
+
+	const gitAddedMarker = new GitChangeMarker('added');
+	const gitModifiedMarker = new GitChangeMarker('modified');
+
+	function gitMarkerFor(change: GitLineChange): GitChangeMarker {
+		return change.type === 'added' ? gitAddedMarker : gitModifiedMarker;
+	}
+
+	function normalizeGitLineChanges(changes: GitLineChange[]): GitLineChange[] {
+		const byLine = new Map<number, GitLineChange['type']>();
+		for (const change of changes) {
+			if (change.line < 1) continue;
+			const current = byLine.get(change.line);
+			byLine.set(change.line, current === 'added' || change.type === 'added' ? 'added' : 'modified');
+		}
+		return [...byLine.entries()]
+			.sort((a, b) => a[0] - b[0])
+			.map(([line, type]) => ({ line, type }));
+	}
+
+	function buildGitGutterMarkers(doc: EditorState['doc'], changes: GitLineChange[]): RangeSet<GutterMarker> {
+		const builder = new RangeSetBuilder<GutterMarker>();
+		for (const change of normalizeGitLineChanges(changes)) {
+			if (change.line < 1 || change.line > doc.lines) continue;
+			const line = doc.line(change.line);
+			builder.add(line.from, line.from, gitMarkerFor(change));
+		}
+		return builder.finish();
+	}
+
+	const gitLineChangeField = StateField.define<{
+		changes: GitLineChange[];
+		markers: RangeSet<GutterMarker>;
+	}>({
+		create(state) {
+			return {
+				changes: [],
+				markers: buildGitGutterMarkers(state.doc, [])
+			};
+		},
+		update(value, transaction) {
+			for (const effect of transaction.effects) {
+				if (effect.is(setGitLineChangesEffect)) {
+					return {
+						changes: effect.value,
+						markers: buildGitGutterMarkers(transaction.state.doc, effect.value)
+					};
+				}
+			}
+			if (transaction.docChanged) {
+				return {
+					...value,
+					markers: buildGitGutterMarkers(transaction.state.doc, value.changes)
+				};
+			}
+			return value;
+		},
+		provide: (field) => [
+			gutterLineClass.from(field, (value) => value.markers)
+		]
+	});
 
 	function diffHunkStart(header: string): { oldStart: number; newStart: number } {
 		const match = header.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
@@ -168,6 +273,266 @@
 			else groups.push({ type: line.type, lines: [line] });
 		}
 		return groups;
+	}
+
+	function splitLines(text: string): string[] {
+		return text.length === 0 ? [] : text.split('\n');
+	}
+
+	function lineChangesBetween(baseContent: string, currentContent: string): GitLineChange[] {
+		const oldLines = splitLines(baseContent);
+		const newLines = splitLines(currentContent);
+		if (oldLines.length === 0) {
+			return newLines.map((_, i) => ({ line: i + 1, type: 'added' }));
+		}
+		if (newLines.length === 0) return [];
+
+		let start = 0;
+		while (
+			start < oldLines.length &&
+			start < newLines.length &&
+			oldLines[start] === newLines[start]
+		) {
+			start++;
+		}
+
+		let oldEnd = oldLines.length - 1;
+		let newEnd = newLines.length - 1;
+		while (oldEnd >= start && newEnd >= start && oldLines[oldEnd] === newLines[newEnd]) {
+			oldEnd--;
+			newEnd--;
+		}
+
+		const oldMid = oldLines.slice(start, oldEnd + 1);
+		const newMid = newLines.slice(start, newEnd + 1);
+		if (newMid.length === 0) return [];
+
+		const changes: GitLineChange[] = [];
+		const paired = Math.min(oldMid.length, newMid.length);
+		for (let i = 0; i < paired; i++) {
+			if (oldMid[i] !== newMid[i]) {
+				changes.push({ line: start + i + 1, type: 'modified' });
+			}
+		}
+
+		for (let i = paired; i < newMid.length; i++) {
+			changes.push({ line: start + i + 1, type: 'added' });
+		}
+
+		return changes;
+	}
+
+	function baseContentFromDiff(currentContent: string, files: DiffFileEntry[]): string {
+		const currentLines = splitLines(currentContent);
+		if (files.length === 0) return currentContent;
+
+		const baseLines: string[] = [];
+		let currentIndex = 0;
+
+		for (const file of files) {
+			for (const hunk of file.hunks) {
+				const { newStart } = diffHunkStart(hunk.header);
+				while (currentIndex < newStart - 1 && currentIndex < currentLines.length) {
+					baseLines.push(currentLines[currentIndex++]);
+				}
+
+				for (const line of hunk.lines) {
+					if (line.type === 'added') {
+						currentIndex++;
+					} else if (line.type === 'removed') {
+						baseLines.push(line.content);
+					} else {
+						baseLines.push(currentLines[currentIndex++] ?? line.content);
+					}
+				}
+			}
+		}
+
+		while (currentIndex < currentLines.length) {
+			baseLines.push(currentLines[currentIndex++]);
+		}
+
+		return baseLines.join('\n');
+	}
+
+	function lineChangesFromDiff(files: DiffFileEntry[]): GitLineChange[] {
+		const changes: GitLineChange[] = [];
+
+		for (const file of files) {
+			for (const hunk of file.hunks) {
+				const lines = diffNumberedLines(hunk);
+				let pendingAdded: number[] = [];
+				let pendingRemoved = 0;
+
+				function flushBlock() {
+					if (pendingAdded.length > 0) {
+						pendingAdded.forEach((line, index) => {
+							changes.push({ line, type: index < pendingRemoved ? 'modified' : 'added' });
+						});
+					}
+					pendingAdded = [];
+					pendingRemoved = 0;
+				}
+
+				for (const line of lines) {
+					if (line.type === 'context') {
+						flushBlock();
+					} else if (line.type === 'removed') {
+						pendingRemoved++;
+					} else if (line.newNumber !== null) {
+						pendingAdded.push(line.newNumber);
+					}
+				}
+				flushBlock();
+			}
+		}
+
+		return changes;
+	}
+
+	function relativeGitPath(path: string): string {
+		const ws = get(activeWorkspace);
+		if (!ws) return path;
+		return path.startsWith(ws.path) ? path.slice(ws.path.replace(/\/$/, '').length + 1) : path;
+	}
+
+	function gitFileStatus(path: string): GitFile | undefined {
+		const status = gitStatusStore.status;
+		if (!status?.is_repo) return undefined;
+		const relPath = relativeGitPath(path);
+		return status.files?.find((f) => f.path === relPath);
+	}
+
+	function applyGitLineChanges() {
+		gitLineChanges = normalizeGitLineChanges(gitLineChanges);
+		view?.dispatch({ effects: setGitLineChangesEffect.of(gitLineChanges) });
+	}
+
+	function currentEditorContent(): string {
+		return view?.state.doc.toString() ?? fileData?.content ?? '';
+	}
+
+	function textLineBreaks(text: string): number {
+		return text.split('\n').length - 1;
+	}
+
+	function docLineAt(doc: EditorState['doc'], pos: number): number {
+		return doc.lineAt(Math.max(0, Math.min(pos, doc.length))).number;
+	}
+
+	function applyLiveGitEdit(update: ViewUpdate) {
+		if (gitBaseContent === null) return;
+
+		let changes = normalizeGitLineChanges(gitLineChanges);
+		update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+			const oldStartLine = docLineAt(update.startState.doc, fromA);
+			const oldEndLine = docLineAt(update.startState.doc, toA);
+			const newStartLine = docLineAt(update.state.doc, fromB);
+			const newEndLine = docLineAt(update.state.doc, toB);
+			const insertedText = inserted.toString();
+			const insertedBreaks = textLineBreaks(insertedText);
+			const removedBreaks = oldEndLine - oldStartLine;
+			const lineDelta = insertedBreaks - removedBreaks;
+
+			changes = changes
+				.map((change) => {
+					if (change.line <= oldStartLine) return change;
+					if (change.line > oldEndLine) return { ...change, line: change.line + lineDelta };
+					return null;
+				})
+				.filter((change): change is GitLineChange => change !== null);
+
+			if (insertedBreaks > 0) {
+				for (let line = newStartLine + 1; line <= newStartLine + insertedBreaks; line++) {
+					changes.push({ line, type: 'added' });
+				}
+			}
+
+			const parts = insertedText.split('\n');
+			const changedExistingLine =
+				insertedBreaks === 0 ||
+				parts[0].length > 0 ||
+				(parts.at(-1)?.length ?? 0) > 0 ||
+				(removedBreaks === 0 && toA > fromA);
+
+			if (changedExistingLine && newStartLine <= newEndLine) {
+				changes.push({ line: newStartLine, type: 'modified' });
+			}
+		}, true);
+
+		gitLineChanges = changes;
+		applyGitLineChanges();
+	}
+
+	function gitFilesSignature(files: GitFile[] | undefined): string {
+		return (files ?? [])
+			.map((f) => `${f.path}:${f.status}:${f.staged ? '1' : '0'}:${f.unstaged ? '1' : '0'}`)
+			.join('|');
+	}
+
+	async function refreshGitLineChanges(path: string) {
+		const seq = ++gitLineRefreshSeq;
+		gitLineChanges = [];
+		gitBaseContent = null;
+
+		if (
+			path.startsWith('untitled:') ||
+			isBinaryPreview ||
+			fileData?.content === null ||
+			fileData?.content === undefined
+		) {
+			applyGitLineChanges();
+			return;
+		}
+
+		const ws = get(activeWorkspace);
+		if (!ws) {
+			applyGitLineChanges();
+			return;
+		}
+
+		if (!gitStatusStore.status) {
+			await gitStatusStore.refresh();
+			if (seq !== gitLineRefreshSeq) return;
+		}
+
+		const status = gitStatusStore.status;
+		const fileStatus = gitFileStatus(path);
+		if (!status?.is_repo) {
+			hasGitChanges = false;
+			applyGitLineChanges();
+			return;
+		}
+		hasGitChanges = !!fileStatus;
+
+		if (!fileStatus) {
+			gitBaseContent = fileData.content;
+			gitLineChanges = [];
+			applyGitLineChanges();
+			return;
+		}
+
+		try {
+			const params = new URLSearchParams({
+				root: ws.path,
+				file: relativeGitPath(path),
+				staged: 'false',
+				untracked: String(fileStatus.status === 'untracked')
+			});
+			const d = (await getGitDiff(params.toString())) as { files?: DiffFileEntry[] };
+			if (seq !== gitLineRefreshSeq) return;
+			gitBaseContent =
+				fileStatus.status === 'untracked'
+					? ''
+					: baseContentFromDiff(fileData.content, d.files ?? []);
+			gitLineChanges = lineChangesFromDiff(d.files ?? []);
+		} catch {
+			if (seq !== gitLineRefreshSeq) return;
+			gitBaseContent = fileData.content;
+			gitLineChanges = [];
+		}
+
+		applyGitLineChanges();
 	}
 
 	function diffBlockClass(type: DiffLine['type']): string {
@@ -272,11 +637,33 @@
 		}
 	});
 
+	$effect(() => {
+		const wsPath = $activeWorkspace?.path ?? '';
+		const status = gitStatusStore.status;
+		const data = fileData;
+		const content = data?.content;
+		if (!data || data.binary || isBinaryPreview || isUntitled || content === null || content === undefined) {
+			return;
+		}
+
+		const statusKey = status
+			? `${status.is_repo}:${gitFilesSignature(status.files)}`
+			: 'pending';
+		const key = `${wsPath}:${data.path}:${content.length}:${statusKey}`;
+		if (key === lastGitLineRefreshKey) return;
+		lastGitLineRefreshKey = key;
+		void refreshGitLineChanges(data.path);
+	});
+
 	function initUntitledFile() {
 		loading = false;
 		error = null;
 		hasChanges = false;
 		saved = false;
+		hasGitChanges = false;
+		gitLineChanges = [];
+		gitBaseContent = null;
+		lastGitLineRefreshKey = '';
 		fileData = {
 			path: filePath,
 			name: filePath.replace('untitled:', ''),
@@ -301,6 +688,8 @@
 		diffMode = false;
 		diffFiles = [];
 		hasGitChanges = false;
+		gitLineChanges = [];
+		lastGitLineRefreshKey = '';
 		destroyEditor();
 		revokeBinaryUrl();
 
@@ -334,6 +723,13 @@
 				if (fileData && !fileData.binary && fileData.content !== null) {
 					if (isMarkdown) {
 						// Preview handled by MarkdownRenderer component
+						if (edit && !openedInEdit) {
+							openedInEdit = true;
+							clearTabEdit(tabId);
+							requestAnimationFrame(() => {
+								enterEditMode();
+							});
+						}
 					} else if (isJson) {
 						try {
 							jsonData = JSON.parse(fileData.content);
@@ -360,13 +756,10 @@
 
 		// Check git status for this file from centralized store (non-blocking)
 		if (!isUntitled && !isBinaryPreview) {
-			const status = gitStatusStore.status;
-			const ws = get(activeWorkspace);
-			if (ws && status?.is_repo && status.files) {
-				const relPath = path.startsWith(ws.path)
-					? path.slice(ws.path.replace(/\/$/, '').length + 1)
-					: path;
-				hasGitChanges = status.files.some((f) => f.path === relPath);
+			const fileStatus = gitFileStatus(path);
+			hasGitChanges = !!fileStatus;
+			if (gitStatusStore.status?.is_repo) {
+				await refreshGitLineChanges(path);
 			}
 		}
 	}
@@ -418,7 +811,13 @@
 			const relPath = filePath.startsWith(ws.path)
 				? filePath.slice(ws.path.replace(/\/$/, '').length + 1)
 				: filePath;
-			const params = new URLSearchParams({ root: ws.path, file: relPath, staged: 'false' });
+			const fileStatus = gitFileStatus(filePath);
+			const params = new URLSearchParams({
+				root: ws.path,
+				file: relPath,
+				staged: 'false',
+				untracked: String(fileStatus?.status === 'untracked')
+			});
 			const d = (await getGitDiff(params.toString())) as { files?: DiffFileEntry[] };
 			diffFiles = d.files ?? [];
 		} catch {
@@ -499,6 +898,7 @@
 
 		const extensions = [
 			lineNumbers(),
+			gitLineChangeField,
 			highlightActiveLineGutter(),
 			highlightSpecialChars(),
 			history(),
@@ -507,11 +907,14 @@
 			indentOnInput(),
 			bracketMatching(),
 			closeBrackets(),
+			autocompletion(),
+			EditorState.languageData.of(() => [{ autocomplete: completeAnyWord }]),
 			rectangularSelection(),
 			highlightActiveLine(),
 			highlightSelectionMatches(),
 			keymap.of([
 				...closeBracketsKeymap,
+				...completionKeymap,
 				...defaultKeymap,
 				...searchKeymap,
 				...historyKeymap,
@@ -532,6 +935,7 @@
 					hasChanges = true;
 					saved = false;
 					markTabUnsaved(tabId, true);
+					applyLiveGitEdit(update);
 				}
 			}),
 			EditorView.theme({
@@ -548,6 +952,12 @@
 				},
 				'.cm-activeLineGutter': { backgroundColor: dark ? '#1a1a1a' : '#f3f4f6' },
 				'.cm-activeLine': { backgroundColor: dark ? '#1a1a1a' : '#f9fafb' },
+				'.cm-lineNumbers .cm-gutterElement.cm-git-line-added': {
+					boxShadow: `inset 2px 0 0 ${dark ? 'rgba(52, 211, 153, 0.75)' : 'rgba(5, 150, 105, 0.65)'}`
+				},
+				'.cm-lineNumbers .cm-gutterElement.cm-git-line-modified': {
+					boxShadow: `inset 2px 0 0 ${dark ? 'rgba(251, 191, 36, 0.7)' : 'rgba(217, 119, 6, 0.6)'}`
+				},
 				'&.cm-focused': { outline: 'none' }
 			}),
 			getLanguageExtension(language)
@@ -555,6 +965,7 @@
 
 		const state = EditorState.create({ doc: content, extensions });
 		view = new EditorView({ state, parent: editorEl });
+		applyGitLineChanges();
 
 		// Watch for theme changes and rebuild editor
 		themeObserver = new MutationObserver(() => {
@@ -607,6 +1018,8 @@
 			fileData!.path = path;
 			fileData!.name = path.split('/').pop() || path;
 			markTabUnsaved(tabId, false);
+			await gitStatusStore.refresh({ force: true });
+			await refreshGitLineChanges(path);
 
 			// If this was an untitled file, promote the tab to a real file
 			if (filePath.startsWith('untitled:')) {

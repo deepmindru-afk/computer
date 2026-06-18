@@ -16,7 +16,7 @@
 
 `cptr` (short for "computer") runs on your machine and serves your whole computer (files, terminal, editor, git) to any browser. It literally is your computer.
 
-Use it from your phone, tablet, laptop, another computer, or the machine it's running on. Designed to feel native on every screen. Plug in an AI that can actually read, write, and run things on your machine, or bring your favourite terminal agent. Terminal multiplexer, parallel AI agents, full workstation, one tool, any device.
+Use it from your phone, tablet, laptop, another computer, or the machine it's running on. Designed to feel native on every screen. Plug in an AI that can actually read, write, and run things on your machine, or bring your favourite terminal agent. Terminal multiplexer, parallel AI agents, full workstation, one tool, your computer, any device.
 
 ## Install
 
@@ -135,6 +135,9 @@ Push a hotfix from the train. Check on a deploy from bed. Ship a side project fr
 Close the tab. Come back tomorrow on any device. Everything is where you left it. Sessions survive disconnects. Your work doesn't care which screen you're on.
 
 Life is short. Touch grass. Read our [Manifesto](MANIFESTO.md).
+
+> Help us build open, empowering tools that put AI in people's hands.
+> [We're hiring](http://careers.openwebui.com/).
 
 ## Docker
 
