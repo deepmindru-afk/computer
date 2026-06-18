@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-06-18
+
+### Fixed
+
+- 🔌 **Socket events no longer missed on slow connections.** Components that listen for real-time updates (sidebar chat list, chat panel, notifications) previously relied on polling to check if the socket was ready. If the socket connected slowly or reconnected, events could be silently dropped. Listeners are now registered centrally and automatically re-attached whenever the connection comes back.
+- 🔄 **WebSocket connection is more resilient.** The socket now prefers a direct WebSocket connection and falls back to polling only when needed, reducing latency and improving reliability on unstable networks.
+
+### Changed
+
+- 📂 **Git status refreshes are debounced.** Rapid filesystem changes (like saving multiple files at once) no longer trigger a flood of git status checks. Updates are batched with a short delay so the UI stays responsive.
+
 ## [0.5.4] - 2026-06-18
 
 ### Added
