@@ -10,7 +10,9 @@
 	let saving = $state(false);
 
 	let enabled = $state(false);
+	let backgroundEnabled = $state(false);
 	let maxConcurrent = $state(3);
+	let maxAsync = $state(3);
 	let maxIterations = $state(30);
 	let maxOutput = $state(30000);
 	let systemPrompt = $state('');
@@ -19,7 +21,9 @@
 		try {
 			const config = await getAdminConfig();
 			enabled = config['subagents.enabled'] === true || config['subagents.enabled'] === 'true';
+			backgroundEnabled = config['subagents.background_enabled'] === true || config['subagents.background_enabled'] === 'true';
 			maxConcurrent = Number(config['subagents.max_concurrent']) || 3;
+			maxAsync = Number(config['subagents.max_async']) || 3;
 			maxIterations = Number(config['subagents.max_iterations']) || 30;
 			maxOutput = Number(config['subagents.max_output']) || 30000;
 			systemPrompt = (config['subagents.system_prompt'] as string) || '';
@@ -34,7 +38,9 @@
 		try {
 			await updateConfig({
 				'subagents.enabled': enabled,
+				'subagents.background_enabled': backgroundEnabled,
 				'subagents.max_concurrent': maxConcurrent,
+				'subagents.max_async': maxAsync,
 				'subagents.max_iterations': maxIterations,
 				'subagents.max_output': maxOutput,
 				'subagents.system_prompt': systemPrompt
@@ -72,6 +78,27 @@
 						<span class="text-[11px] text-gray-400 dark:text-gray-600">{$t('admin.subagentsMaxConcurrentHint')}</span>
 					</div>
 				</div>
+
+				<div>
+					<label class="flex items-center justify-between cursor-pointer">
+						<span class="text-xs text-gray-600 dark:text-gray-400">{$t('admin.subagentsBackgroundEnabled')}</span>
+						<ToggleSwitch value={backgroundEnabled} onchange={(v) => { backgroundEnabled = v; }} />
+					</label>
+					<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-1">
+						{$t('admin.subagentsBackgroundHint')}
+					</p>
+				</div>
+
+				{#if backgroundEnabled}
+					<div>
+						<label class="text-xs text-gray-600 dark:text-gray-400" for="sa-async">{$t('admin.subagentsMaxAsync')}</label>
+						<div class="flex items-center gap-1.5 mt-1">
+							<input id="sa-async" type="number" bind:value={maxAsync} min="1" max="10"
+								class="w-16 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors" />
+							<span class="text-[11px] text-gray-400 dark:text-gray-600">{$t('admin.subagentsMaxAsyncHint')}</span>
+						</div>
+					</div>
+				{/if}
 
 				<div>
 					<label class="text-xs text-gray-600 dark:text-gray-400" for="sa-iterations">{$t('admin.subagentsMaxIterations')}</label>

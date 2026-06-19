@@ -75,6 +75,12 @@ async def shutdown():
     bot_manager = getattr(app.state, "bot_manager", None)
     if bot_manager:
         await bot_manager.stop_all()
+    try:
+        from cptr.utils.async_subagents import cancel_all_async_subagents
+
+        await cancel_all_async_subagents(reason="shutdown")
+    except Exception:
+        pass
     # Clean up browser sessions and launched Chrome
     try:
         from cptr.utils.browser.session import session_manager

@@ -161,8 +161,10 @@
 	const activePath = $derived.by((): PathEntry[] => {
 		if (!allMessages.length) return [];
 
-		// Exclude queued messages from the display path — they only appear in the queue UI
-		const displayMessages = allMessages.filter((m) => !m.meta?.queued);
+		// Exclude pending internal inputs until the parent has processed them.
+		const displayMessages = allMessages.filter(
+			(m) => !m.meta?.queued && !m.meta?.async_subagent_pending
+		);
 		if (!displayMessages.length) return [];
 
 		const msgMap = new Map(displayMessages.map((m) => [m.id, m]));
@@ -259,7 +261,7 @@
 	const isLanding = $derived(allMessages.length === 0 && !chatId);
 	const workspaceName = $derived(workspace.split('/').pop() || 'workspace');
 
-	// Queued messages: user messages with meta.queued flag (server-side queue)
+	// Queued messages: user-authored messages waiting behind an active response.
 	const queuedMessages = $derived(
 		allMessages
 			.filter((m) => m.role === 'user' && m.meta?.queued)
@@ -368,7 +370,8 @@
 		output?: any;
 		done?: boolean;
 		error?: string;
-		queue_processed?: boolean;
+		pending_inputs_processed?: boolean;
+		async_subagent_pending?: boolean;
 		title?: string;
 	}) {
 		// On the landing page, update the chat list in place from socket events
@@ -402,8 +405,8 @@
 			updateTab(tabId, data.chat_id, data.title);
 		}
 
-		// Queue was processed server-side: reload to see combined message + new generation
-		if (data.queue_processed) {
+		// Follow-up state changed server-side: reload to see new transcript/generation state.
+		if (data.pending_inputs_processed || data.async_subagent_pending) {
 			loadChat(data.chat_id);
 			return;
 		}

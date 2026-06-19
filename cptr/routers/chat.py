@@ -428,15 +428,23 @@ async def send_message(body: SendMessageRequest, request: Request):
         # Sync params into chat meta
         if chat.meta is None:
             chat.meta = {}
-        if chat.meta.get("params") != body.params:
+        if (
+            chat.meta.get("params") != body.params
+            or chat.meta.get("last_model") != body.model_id
+        ):
             chat.meta["params"] = body.params
+            chat.meta["last_model"] = body.model_id
             await Chat.update_meta(chat.id, chat.meta)
     else:
         title = body.content[:50].strip() or "New Chat"
         chat = await Chat.create(
             user_id=user_id,
             title=title,
-            meta={"workspace": body.workspace, "params": body.params},
+            meta={
+                "workspace": body.workspace,
+                "params": body.params,
+                "last_model": body.model_id,
+            },
             created_at=now_ms(),
         )
         # Ensure .cptr/chats/ dir exists
@@ -446,69 +454,72 @@ async def send_message(body: SendMessageRequest, request: Request):
         # Auto-add .cptr to .gitignore if this is a git repo
         await asyncio.to_thread(ensure_cptr_gitignored, body.workspace)
 
-    # Check if the chat has an in-progress assistant message.
-    # If so, queue this message instead of starting a new task.
-    if body.chat_id and await _chat_has_active_generation(chat.id):
-        user_msg = await ChatMessage.create(
-            chat_id=chat.id,
-            role="user",
-            content=body.content,
-            parent_id=body.parent_id,
-            meta={"queued": True},
-            created_at=now_ms(),
-        )
-        # Double-check: if generation finished during our create,
-        # process queue now to close the race window.
-        if not await _chat_has_active_generation(chat.id):
-            from cptr.utils.chat_task import _process_queue
-
-            workspace = (chat.meta or {}).get("workspace", body.workspace)
-            await _process_queue(chat.id, user_id, workspace)
-        return {"chat_id": chat.id, "message_id": user_msg.id, "queued": True}
-
     # Resolve connection for model
     connection, bare_model = await _resolve_connection(body.model_id, request.app.state)
 
     # Detect regeneration by checking parent message role
     parent_msg = await ChatMessage.get_by_id(body.parent_id) if body.parent_id else None
 
-    if parent_msg and parent_msg.role == "user":
-        # Regeneration: create assistant as sibling of existing response
-        assistant_parent = body.parent_id
-    else:
-        # Normal send: create user message first
-        user_meta = {"files": body.files} if body.files else None
-        user_msg = await ChatMessage.create(
-            chat_id=chat.id,
-            role="user",
-            content=body.content,
-            parent_id=body.parent_id,
-            meta=user_meta,
-            created_at=now_ms(),
-        )
-        assistant_parent = user_msg.id
-
-    # Create empty assistant message
-    assistant_msg = await ChatMessage.create(
-        chat_id=chat.id,
-        role="assistant",
-        content="",
-        parent_id=assistant_parent,
-        model=body.model_id,
-        done=False,
-        created_at=now_ms(),
+    from cptr.utils.chat_task import (
+        get_pending_input_lock,
+        process_pending_chat_inputs,
+        start_task,
     )
 
-    # Update chat pointer to new leaf
-    await Chat.update_current_message(chat.id, assistant_msg.id, now_ms())
+    queued_msg = None
+    user_msg = None
+    assistant_msg = None
+    async with get_pending_input_lock(chat.id):
+        if body.chat_id and await _chat_has_active_generation(chat.id):
+            queued_msg = await ChatMessage.create(
+                chat_id=chat.id,
+                role="user",
+                content=body.content,
+                parent_id=body.parent_id,
+                meta={"queued": True},
+                created_at=now_ms(),
+            )
+        else:
+            if parent_msg and parent_msg.role == "user":
+                # Regeneration: create assistant as sibling of existing response.
+                assistant_parent = body.parent_id
+            else:
+                user_meta = {"files": body.files} if body.files else None
+                user_msg = await ChatMessage.create(
+                    chat_id=chat.id,
+                    role="user",
+                    content=body.content,
+                    parent_id=body.parent_id,
+                    meta=user_meta,
+                    created_at=now_ms(),
+                )
+                assistant_parent = user_msg.id
+
+            assistant_msg = await ChatMessage.create(
+                chat_id=chat.id,
+                role="assistant",
+                content="",
+                parent_id=assistant_parent,
+                model=body.model_id,
+                done=False,
+                created_at=now_ms(),
+            )
+
+            # Update chat pointer to new leaf while still holding the input lock.
+            await Chat.update_current_message(chat.id, assistant_msg.id, now_ms())
+
+    if queued_msg:
+        workspace = (chat.meta or {}).get("workspace", body.workspace)
+        await process_pending_chat_inputs(chat.id, user_id, workspace)
+        return {"chat_id": chat.id, "message_id": queued_msg.id, "queued": True}
+
+    if not assistant_msg:
+        raise HTTPException(500, "failed to create assistant message")
 
     # Export JSON immediately so list_chats discovers it right away
     from cptr.utils.chat_export import export_chat_to_file
 
     await export_chat_to_file(chat.id)
-
-    # Start background task (export_chat_to_file also runs after task completes)
-    from cptr.utils.chat_task import start_task
 
     start_task(
         message_id=assistant_msg.id,
@@ -680,11 +691,11 @@ async def approve_tool(chat_id: str, message_id: str, body: ApproveRequest, requ
     else:
         call["status"] = "rejected"
         await ChatMessage.update(message_id, output=output, done=True)
-        # Process queued messages since this chat is now idle
-        from cptr.utils.chat_task import _process_queue
+        # Process pending inputs since this chat is now idle.
+        from cptr.utils.chat_task import process_pending_chat_inputs
 
         workspace = chat.meta.get("workspace", "") if chat.meta else ""
-        await _process_queue(chat_id, user_id, workspace)
+        await process_pending_chat_inputs(chat_id, user_id, workspace)
 
     return {"ok": True}
 
@@ -715,11 +726,11 @@ async def cancel_task_endpoint(chat_id: str, message_id: str, request: Request):
                     item["status"] = "rejected"
             await ChatMessage.update(message_id, output=output, done=True)
 
-    # Process queued messages since this chat may now be idle
-    from cptr.utils.chat_task import _process_queue
+    # Process pending inputs since this chat may now be idle.
+    from cptr.utils.chat_task import process_pending_chat_inputs
 
     workspace = chat.meta.get("workspace", "") if chat.meta else ""
-    await _process_queue(chat_id, user_id, workspace)
+    await process_pending_chat_inputs(chat_id, user_id, workspace)
 
     return {"ok": True}
 
@@ -824,53 +835,57 @@ async def queue_send_now(chat_id: str, message_id: str, request: Request):
     if not (msg.meta and msg.meta.get("queued")):
         raise HTTPException(400, "message is not queued")
 
-    # Cancel any active task
-    all_msgs = await ChatMessage.get_all_by_chat(chat_id)
-    for m in all_msgs:
-        if m.role == "assistant" and not m.done:
-            from cptr.utils.chat_task import cancel_task
+    from cptr.utils.chat_task import cancel_task, get_pending_input_lock, start_task
 
-            await cancel_task(m.id)
-            await ChatMessage.update(m.id, done=True)
+    async with get_pending_input_lock(chat_id):
+        # Cancel any active task
+        all_msgs = await ChatMessage.get_all_by_chat(chat_id)
+        for m in all_msgs:
+            if m.role == "assistant" and not m.done:
+                await cancel_task(m.id)
+                await ChatMessage.update(m.id, done=True)
 
-    # Delete all OTHER queued messages, keep this one
-    for m in all_msgs:
-        if m.role == "user" and m.meta and m.meta.get("queued") and m.id != message_id:
+        # Delete all OTHER queued user prompts, keep this one.
+        for m in all_msgs:
+            if not (m.role == "user" and m.meta and m.meta.get("queued") and m.id != message_id):
+                continue
             await ChatMessage.delete(m.id)
 
-    # Clear queued flag on this message
-    meta = dict(msg.meta or {})
-    meta.pop("queued", None)
-    await ChatMessage.update(message_id, meta=meta or None)
+        # Clear queued flag on this message
+        meta = dict(msg.meta or {})
+        meta.pop("queued", None)
+        await ChatMessage.update(message_id, meta=meta or None)
 
-    # Find parent: latest done assistant message, or the queued message's parent
-    done_assistants = [m for m in all_msgs if m.role == "assistant" and m.done]
-    parent_id = done_assistants[-1].id if done_assistants else msg.parent_id
+        # Find parent: latest done assistant message, or the queued message's parent
+        done_assistants = [m for m in all_msgs if m.role == "assistant" and m.done]
+        parent_id = done_assistants[-1].id if done_assistants else msg.parent_id
 
-    # Re-parent the user message to the correct leaf
-    if msg.parent_id != parent_id:
-        await ChatMessage.update(message_id, parent_id=parent_id)
+        # Re-parent the user message to the correct leaf
+        if msg.parent_id != parent_id:
+            await ChatMessage.update(message_id, parent_id=parent_id)
 
-    # Resolve connection and start task
-    model_id = msg.model or (all_msgs[-1].model if all_msgs else "")
-    if not model_id:
-        # Fall back to last used model from chat meta
-        model_id = (chat.meta or {}).get("last_model", "")
-    connection, bare_model = await _resolve_connection(model_id, request.app.state)
-    workspace = (chat.meta or {}).get("workspace", "")
+        # Resolve connection and start task
+        model_id = msg.model or (all_msgs[-1].model if all_msgs else "")
+        if not model_id:
+            # Fall back to last used model from chat meta
+            model_id = (chat.meta or {}).get("last_model", "")
+        connection, bare_model = await _resolve_connection(model_id, request.app.state)
+        workspace = (chat.meta or {}).get("workspace", "")
+        meta_for_model = dict(chat.meta or {})
+        if meta_for_model.get("last_model") != model_id:
+            meta_for_model["last_model"] = model_id
+            await Chat.update_meta(chat.id, meta_for_model, now_ms())
 
-    assistant_msg = await ChatMessage.create(
-        chat_id=chat_id,
-        role="assistant",
-        content="",
-        parent_id=message_id,
-        model=model_id,
-        done=False,
-        created_at=now_ms(),
-    )
-    await Chat.update_current_message(chat_id, assistant_msg.id, now_ms())
-
-    from cptr.utils.chat_task import start_task
+        assistant_msg = await ChatMessage.create(
+            chat_id=chat_id,
+            role="assistant",
+            content="",
+            parent_id=message_id,
+            model=model_id,
+            done=False,
+            created_at=now_ms(),
+        )
+        await Chat.update_current_message(chat_id, assistant_msg.id, now_ms())
 
     start_task(
         message_id=assistant_msg.id,

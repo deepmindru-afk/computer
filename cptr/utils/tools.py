@@ -1498,6 +1498,9 @@ async def _get_subagent_config() -> dict:
 
     return {
         "max_concurrent": int(await Config.get("subagents.max_concurrent") or 3),
+        "background_enabled": (await Config.get("subagents.background_enabled"))
+        in (True, "true", "1"),
+        "max_async": int(await Config.get("subagents.max_async") or 3),
         "max_iterations": int(await Config.get("subagents.max_iterations") or 30),
         "max_output": int(await Config.get("subagents.max_output") or 30_000),
         "system_prompt": (await Config.get("subagents.system_prompt"))
@@ -1515,16 +1518,89 @@ def _truncate_output(text: str, max_chars: int) -> str:
 async def delegate_task(
     task: str,
     context: str = "",
+    background: bool = False,
     *,
     __context__: dict,
 ) -> str:
-    """Delegate a task to a sub-agent. The sub-agent has full access to read, write, edit files, and run commands. Use for parallel work — call multiple times in one response to run tasks concurrently.
+    """Delegate a task to a sub-agent. Use background=true for long-running independent work.
 
     :param task: What the sub-agent should do.
     :param context: Optional context (e.g. relevant file paths, decisions made so far).
+    :param background: Return a handle immediately and inject the final result into this chat when done.
     """
     global _subagent_semaphore
     config = await _get_subagent_config()
+
+    if background:
+        if not config["background_enabled"]:
+            return "Error: background sub-agents are disabled in settings."
+
+        from cptr.utils.async_subagents import (
+            attach_subagent_chat,
+            fail_reserved_subagent,
+            reserve_async_subagent,
+            start_async_subagent,
+        )
+
+        reserve = await reserve_async_subagent(
+            config["max_async"],
+            task=task,
+            context=context,
+            workspace=__context__["workspace"],
+            user_id=__context__["user_id"],
+            parent_chat_id=__context__["chat_id"],
+            parent_message_id=__context__.get("message_id"),
+            connection=__context__["connection"],
+            model=__context__["model_id"],
+            model_id=__context__.get("full_model_id") or __context__["model_id"],
+        )
+        if reserve.get("status") == "rejected":
+            return f"Error: {reserve['error']}"
+
+        delegation_id = reserve["delegation_id"]
+        try:
+            chat, assistant_msg = await _create_subagent_chat(
+                task=task,
+                context=context,
+                workspace=__context__["workspace"],
+                model=__context__["model_id"],
+                user_id=__context__["user_id"],
+                parent_chat_id=__context__["chat_id"],
+                config=config,
+                delegation_id=delegation_id,
+            )
+        except Exception as e:
+            await fail_reserved_subagent(delegation_id, str(e))
+            return f"Error: failed to create background sub-agent: {e}"
+
+        await attach_subagent_chat(
+            delegation_id,
+            subagent_chat_id=chat.id,
+            subagent_message_id=assistant_msg.id,
+        )
+
+        async def _runner() -> str:
+            return await _run_existing_subagent_chat(
+                assistant_msg_id=assistant_msg.id,
+                chat_id=chat.id,
+                workspace=__context__["workspace"],
+                connection=__context__["connection"],
+                model=__context__["model_id"],
+                user_id=__context__["user_id"],
+                config=config,
+            )
+
+        await start_async_subagent(delegation_id, _runner)
+        return json.dumps(
+            {
+                "status": "dispatched",
+                "delegation_id": delegation_id,
+                "subagent_chat_id": chat.id,
+                "mode": "background",
+                "task": task,
+            }
+        )
+
     if _subagent_semaphore is None:
         _subagent_semaphore = asyncio.Semaphore(config["max_concurrent"])
 
@@ -1541,40 +1617,40 @@ async def delegate_task(
         )
 
 
-async def _run_subagent_chat(
+async def _create_subagent_chat(
     task: str,
     context: str,
     workspace: str,
-    connection: dict,
     model: str,
     user_id: str,
     parent_chat_id: str,
     config: dict,
-) -> str:
-    """Create a real chat and run the agent loop on it."""
+    delegation_id: str | None = None,
+):
+    """Create the real chat/messages used by a sub-agent."""
     from cptr.models import Chat, ChatMessage
-    from cptr.utils.chat_task import run_chat_task
+    from cptr.utils.chat_export import export_chat_to_file
     from cptr.utils.config import now_ms
 
-    # Build the user message content
     user_content = f"{task}\n\n## Context\n{context}" if context else task
+    meta = {
+        "workspace": workspace,
+        "subagent": True,
+        "parent_chat_id": parent_chat_id,
+        "params": {
+            "tool_approval_mode": "full",  # auto-approve all tools
+        },
+    }
+    if delegation_id:
+        meta["delegation_id"] = delegation_id
 
-    # Create a real chat, marked as a sub-agent
     chat = await Chat.create(
         user_id=user_id,
         title=f"Sub-agent: {task[:60]}",
-        meta={
-            "workspace": workspace,
-            "subagent": True,
-            "parent_chat_id": parent_chat_id,
-            "params": {
-                "tool_approval_mode": "full",  # auto-approve all tools
-            },
-        },
+        meta=meta,
         created_at=now_ms(),
     )
 
-    # Create user message
     user_msg = await ChatMessage.create(
         chat_id=chat.id,
         role="user",
@@ -1582,7 +1658,6 @@ async def _run_subagent_chat(
         created_at=now_ms(),
     )
 
-    # Create empty assistant message
     assistant_msg = await ChatMessage.create(
         chat_id=chat.id,
         role="assistant",
@@ -1594,22 +1669,67 @@ async def _run_subagent_chat(
     )
 
     await Chat.update_current_message(chat.id, assistant_msg.id, now_ms())
+    await export_chat_to_file(chat.id)
+    return chat, assistant_msg
 
-    # Run the SAME agent loop as a normal chat — no special code
+
+async def _run_existing_subagent_chat(
+    assistant_msg_id: str,
+    chat_id: str,
+    workspace: str,
+    connection: dict,
+    model: str,
+    user_id: str,
+    config: dict,
+) -> str:
+    """Run the agent loop for an already-created sub-agent chat."""
+    from cptr.models import ChatMessage
+    from cptr.utils.chat_task import run_chat_task
+
     await run_chat_task(
-        message_id=assistant_msg.id,
-        chat_id=chat.id,
+        message_id=assistant_msg_id,
+        chat_id=chat_id,
         user_id=user_id,
         connection=connection,
         workspace=workspace,
         model=model,
     )
 
-    # Read back the completed message
-    result_msg = await ChatMessage.get_by_id(assistant_msg.id)
+    result_msg = await ChatMessage.get_by_id(assistant_msg_id)
     output = result_msg.content if result_msg else "Sub-agent produced no output."
 
     return _truncate_output(output, config["max_output"])
+
+
+async def _run_subagent_chat(
+    task: str,
+    context: str,
+    workspace: str,
+    connection: dict,
+    model: str,
+    user_id: str,
+    parent_chat_id: str,
+    config: dict,
+) -> str:
+    """Create a real chat and run the agent loop on it."""
+    chat, assistant_msg = await _create_subagent_chat(
+        task=task,
+        context=context,
+        workspace=workspace,
+        model=model,
+        user_id=user_id,
+        parent_chat_id=parent_chat_id,
+        config=config,
+    )
+    return await _run_existing_subagent_chat(
+        assistant_msg_id=assistant_msg.id,
+        chat_id=chat.id,
+        workspace=workspace,
+        connection=connection,
+        model=model,
+        user_id=user_id,
+        config=config,
+    )
 
 
 SUBAGENT_TOOLS: dict[str, dict] = {
@@ -1891,6 +2011,24 @@ def _fn_to_schema(name: str, fn) -> dict:
     }
 
 
+def _without_background_param(schema: dict) -> dict:
+    """Return a delegate_task schema copy without the background option."""
+    if schema.get("name") != "delegate_task":
+        return schema
+    schema = {
+        **schema,
+        "parameters": {
+            **schema.get("parameters", {}),
+            "properties": dict(schema.get("parameters", {}).get("properties", {})),
+        },
+    }
+    schema["parameters"]["properties"].pop("background", None)
+    required = schema["parameters"].get("required")
+    if isinstance(required, list):
+        schema["parameters"]["required"] = [r for r in required if r != "background"]
+    return schema
+
+
 async def get_tool_list() -> list[dict]:
     """Return tool schemas for the LLM.
 
@@ -1898,6 +2036,7 @@ async def get_tool_list() -> list[dict]:
     and external tool server tools when configured.
     """
     tools = dict(TOOLS)
+    background_subagents_enabled = False
     try:
         from cptr.models import Config
 
@@ -1905,10 +2044,17 @@ async def get_tool_list() -> list[dict]:
             tools.update(BROWSER_TOOLS)
         if (await Config.get("subagents.enabled")) in (True, "true", "1"):
             tools.update(SUBAGENT_TOOLS)
+            background_subagents_enabled = (await Config.get("subagents.background_enabled")) in (
+                True,
+                "true",
+                "1",
+            )
     except Exception:
         pass
 
     schemas = [_fn_to_schema(name, t["fn"]) for name, t in tools.items()]
+    if not background_subagents_enabled:
+        schemas = [_without_background_param(s) for s in schemas]
 
     # Add external tool server schemas
     try:
