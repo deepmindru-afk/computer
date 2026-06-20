@@ -19,6 +19,8 @@
 	let braveKey = $state('');
 	let perplexityKey = $state('');
 	let perplexityBaseUrl = $state('');
+	let firecrawlSearchKey = $state('');
+	let firecrawlSearchBaseUrl = $state('https://api.firecrawl.dev');
 	let ccKey = $state('');
 	let ccBaseUrl = $state('');
 	let ccModel = $state('');
@@ -46,6 +48,8 @@
 			braveKey = (config['web.brave_api_key'] as string) || '';
 			perplexityKey = (config['web.perplexity_api_key'] as string) || '';
 			perplexityBaseUrl = (config['web.perplexity_base_url'] as string) || '';
+			firecrawlSearchKey = (config['web.firecrawl_api_key'] as string) || '';
+			firecrawlSearchBaseUrl = (config['web.firecrawl_base_url'] as string) || 'https://api.firecrawl.dev';
 			ccKey = (config['web.chat_completions_api_key'] as string) || '';
 			ccBaseUrl = (config['web.chat_completions_base_url'] as string) || '';
 			ccModel = (config['web.chat_completions_model'] as string) || '';
@@ -77,6 +81,8 @@
 				'web.brave_api_key': braveKey,
 				'web.perplexity_api_key': perplexityKey,
 				'web.perplexity_base_url': perplexityBaseUrl,
+				'web.firecrawl_api_key': firecrawlSearchKey,
+				'web.firecrawl_base_url': firecrawlSearchBaseUrl,
 				'web.chat_completions_api_key': ccKey,
 				'web.chat_completions_base_url': ccBaseUrl,
 				'web.chat_completions_model': ccModel,
@@ -147,6 +153,7 @@
 						<option value="exa">Exa</option>
 						<option value="tavily">Tavily</option>
 						<option value="brave">Brave</option>
+						<option value="firecrawl">{$t('admin.browserFirecrawl')}</option>
 						<option value="perplexity">Perplexity</option>
 						<option value="duckduckgo">DuckDuckGo</option>
 						<option value="chat_completions">{$t('admin.webChatCompletions')}</option>
@@ -180,6 +187,19 @@
 						<input id="brave-key" type="password" bind:value={braveKey} placeholder="BSA..."
 							class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors" />
 						<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-0.5">{$t('admin.webBraveHint')}</p>
+					</div>
+				{:else if searchProvider === 'firecrawl'}
+					<div>
+						<label class="text-xs text-gray-600 dark:text-gray-400" for="web-fc-key">{$t('admin.webFirecrawlKey')}</label>
+						<input id="web-fc-key" type="password" bind:value={firecrawlSearchKey} placeholder="fc-..."
+							class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors" />
+						<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-0.5">{$t('admin.webFirecrawlHint')}</p>
+					</div>
+					<div>
+						<label class="text-xs text-gray-600 dark:text-gray-400" for="web-fc-url">{$t('admin.webFirecrawlBaseUrl')}</label>
+						<input id="web-fc-url" type="text" bind:value={firecrawlSearchBaseUrl} placeholder="https://api.firecrawl.dev"
+							class="w-full mt-1 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors" />
+						<p class="text-[11px] text-gray-400 dark:text-gray-600 mt-0.5">{$t('admin.browserFirecrawlBaseUrlHint')}</p>
 					</div>
 				{:else if searchProvider === 'perplexity'}
 					<div>

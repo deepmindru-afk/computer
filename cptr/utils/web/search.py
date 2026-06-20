@@ -5,7 +5,8 @@ Priority in auto mode:
 2. Perplexity (PERPLEXITY_API_KEY or web.perplexity_api_key, optional PERPLEXITY_BASE_URL or web.perplexity_base_url)
 3. Tavily     (TAVILY_API_KEY or web.tavily_api_key)
 4. Brave      (BRAVE_API_KEY or web.brave_api_key)
-5. DuckDuckGo (zero-config fallback)
+5. Firecrawl  (FIRECRAWL_API_KEY or web.firecrawl_api_key)
+6. DuckDuckGo (zero-config fallback)
 """
 
 from __future__ import annotations
@@ -41,7 +42,15 @@ async def _get_config(key: str) -> str:
 
 async def web_search_handler(query: str) -> str:
     """Search the web using the configured or best available provider."""
-    from cptr.utils.web import exa, perplexity, tavily, brave, duckduckgo, chat_completions
+    from cptr.utils.web import (
+        exa,
+        perplexity,
+        tavily,
+        brave,
+        duckduckgo,
+        chat_completions,
+        firecrawl,
+    )
 
     # Check if web access is disabled by admin
     enabled = await _get_config("web.enabled")
@@ -52,18 +61,26 @@ async def web_search_handler(query: str) -> str:
 
     exa_key = await _get_key("EXA_API_KEY", "web.exa_api_key")
     perplexity_key = await _get_key("PERPLEXITY_API_KEY", "web.perplexity_api_key")
-    perplexity_url = (
-        await _get_config("web.perplexity_base_url")
-    ) or os.environ.get("PERPLEXITY_BASE_URL", "")
+    perplexity_url = (await _get_config("web.perplexity_base_url")) or os.environ.get(
+        "PERPLEXITY_BASE_URL", ""
+    )
     tavily_key = await _get_key("TAVILY_API_KEY", "web.tavily_api_key")
     brave_key = await _get_key("BRAVE_API_KEY", "web.brave_api_key")
+    firecrawl_key = await _get_key("FIRECRAWL_API_KEY", "web.firecrawl_api_key")
+    if not firecrawl_key:
+        firecrawl_key = await _get_config("browser.firecrawl_api_key")
+    firecrawl_url = (await _get_config("web.firecrawl_base_url")) or os.environ.get(
+        "FIRECRAWL_BASE_URL", ""
+    )
+    if not firecrawl_url:
+        firecrawl_url = await _get_config("browser.firecrawl_base_url")
     cc_key = await _get_key("CHAT_COMPLETIONS_SEARCH_API_KEY", "web.chat_completions_api_key")
-    cc_url = (
-        await _get_config("web.chat_completions_base_url")
-    ) or os.environ.get("CHAT_COMPLETIONS_SEARCH_BASE_URL", "")
-    cc_model = (
-        await _get_config("web.chat_completions_model")
-    ) or os.environ.get("CHAT_COMPLETIONS_SEARCH_MODEL", "")
+    cc_url = (await _get_config("web.chat_completions_base_url")) or os.environ.get(
+        "CHAT_COMPLETIONS_SEARCH_BASE_URL", ""
+    )
+    cc_model = (await _get_config("web.chat_completions_model")) or os.environ.get(
+        "CHAT_COMPLETIONS_SEARCH_MODEL", ""
+    )
 
     # Explicit provider mode
     if provider != "auto":
@@ -75,7 +92,11 @@ async def web_search_handler(query: str) -> str:
             elif provider == "perplexity":
                 if not perplexity_key:
                     return "Error: Perplexity API key not configured."
-                return await perplexity.search(query, perplexity_key, base_url=perplexity_url) if perplexity_url else await perplexity.search(query, perplexity_key)
+                return (
+                    await perplexity.search(query, perplexity_key, base_url=perplexity_url)
+                    if perplexity_url
+                    else await perplexity.search(query, perplexity_key)
+                )
             elif provider == "tavily":
                 if not tavily_key:
                     return "Error: Tavily API key not configured."
@@ -84,6 +105,12 @@ async def web_search_handler(query: str) -> str:
                 if not brave_key:
                     return "Error: Brave API key not configured."
                 return await brave.search(query, brave_key)
+            elif provider == "firecrawl":
+                if not firecrawl_key:
+                    return "Error: Firecrawl API key not configured."
+                if firecrawl_url:
+                    return await firecrawl.search(query, firecrawl_key, base_url=firecrawl_url)
+                return await firecrawl.search(query, firecrawl_key)
             elif provider == "duckduckgo":
                 return await duckduckgo.search(query)
             elif provider == "chat_completions":
@@ -102,11 +129,16 @@ async def web_search_handler(query: str) -> str:
         providers.append(("exa", lambda: exa.search(query, exa_key)))
     if perplexity_key:
         _pplx_kw = {"base_url": perplexity_url} if perplexity_url else {}
-        providers.append(("perplexity", lambda: perplexity.search(query, perplexity_key, **_pplx_kw)))
+        providers.append(
+            ("perplexity", lambda: perplexity.search(query, perplexity_key, **_pplx_kw))
+        )
     if tavily_key:
         providers.append(("tavily", lambda: tavily.search(query, tavily_key)))
     if brave_key:
         providers.append(("brave", lambda: brave.search(query, brave_key)))
+    if firecrawl_key:
+        _fc_kw = {"base_url": firecrawl_url} if firecrawl_url else {}
+        providers.append(("firecrawl", lambda: firecrawl.search(query, firecrawl_key, **_fc_kw)))
     providers.append(("duckduckgo", lambda: duckduckgo.search(query)))
 
     for name, fn in providers:
