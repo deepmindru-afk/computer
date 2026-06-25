@@ -1213,7 +1213,8 @@ async def run_chat_task(
                 import re as _re
 
                 mentioned = _re.findall(
-                    r"\$([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)", last_user["content"]
+                    r"\$([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)",
+                    _plain_message_text(last_user.get("content")),
                 )
                 skill_names = {s.name for s in skills}
                 attached_skill_ids = [m for m in mentioned if m in skill_names]
