@@ -37,19 +37,22 @@
 
 	function normalizeProfile(profile: AgentProfile): AgentProfile {
 		const models = profile.models?.map((m) => m.trim()).filter(Boolean);
-		const nextModels = models.length ? models : ['default'];
+		const nextModels = models.length ? models : [];
 		const defaultModel = nextModels.includes(profile.default_model)
 			? profile.default_model
-			: nextModels[0];
+			: nextModels[0] || '';
 		return {
 			...profile,
 			id: profile.id.trim(),
 			name: profile.name.trim() || profile.id.trim(),
-			command: profile.command.trim() || (profile.agent === 'codex' ? 'codex' : 'claude'),
+			command: profile.command.trim() || defaultCommand(profile.agent),
 			home: profile.home?.trim() || null,
 			models: nextModels,
 			default_model: defaultModel,
-			launch_args: profile.launch_args?.trim() || ''
+			launch_args: profile.launch_args?.trim() || '',
+			api_endpoint: profile.api_endpoint?.trim() || '',
+			server_url: profile.server_url?.trim() || '',
+			server_password: profile.server_password?.trim() || ''
 		};
 	}
 
@@ -60,9 +63,8 @@
 		saved = Object.fromEntries(data.profiles.map((entry) => [entry.id, !entry.implicit]));
 	}
 
-	function newProfile(agent: 'codex' | 'claude_code' = 'codex'): AgentProfile {
-		const base = agent === 'codex' ? 'codex' : 'claude-code';
-		const defaultModel = agent === 'codex' ? 'gpt-5.4' : 'claude-sonnet-4-6';
+	function newProfile(agent: AgentProfile['agent'] = 'codex'): AgentProfile {
+		const base = defaultProfileId(agent);
 		let suffix = profiles.length + 1;
 		let id = `${base}-${suffix}`;
 		while (profiles.some((p) => p.id === id)) {
@@ -72,23 +74,55 @@
 		return {
 			id,
 			agent,
-			name: agent === 'codex' ? 'Codex' : 'Claude Code',
+			name: agentLabel(agent),
 			mode: 'enabled',
-			command: agent === 'codex' ? 'codex' : 'claude',
+			command: defaultCommand(agent),
 			home: null,
-			models: [defaultModel],
-			default_model: defaultModel,
+			models: [],
+			default_model: '',
 			approval_mode: 'auto',
 			sandbox_mode: 'workspace-write',
 			permission_mode: 'default',
-			launch_args: ''
+			launch_args: '',
+			api_endpoint: '',
+			server_url: '',
+			server_password: ''
 		};
 	}
 
 	function profileSubtitle(profile: AgentProfile): string {
 		const modelCount = profile.models?.length || 0;
-		const modelLabel = modelCount === 1 ? profile.default_model : `${modelCount} models`;
+		const modelLabel =
+			modelCount === 0
+				? 'auto-detect'
+				: modelCount === 1
+					? profile.default_model
+					: `${modelCount} models`;
 		return `agent:${profile.id} · ${modelLabel}`;
+	}
+
+	function defaultProfileId(agent: AgentProfile['agent']): string {
+		return agent === 'claude_code' ? 'claude-code' : agent;
+	}
+
+	function defaultCommand(agent: AgentProfile['agent']): string {
+		return {
+			codex: 'codex',
+			claude_code: 'claude',
+			cursor: 'agent',
+			grok: 'grok',
+			opencode: 'opencode'
+		}[agent];
+	}
+
+	function agentLabel(agent: AgentProfile['agent']): string {
+		return {
+			codex: 'Codex',
+			claude_code: 'Claude Code',
+			cursor: 'Cursor',
+			grok: 'Grok',
+			opencode: 'OpenCode'
+		}[agent];
 	}
 
 	function statusKey(profile: AgentProfile): string {

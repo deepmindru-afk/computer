@@ -20,8 +20,8 @@ DEFAULT_AGENT_PROFILES: list[dict[str, Any]] = [
         "mode": "auto",
         "command": "codex",
         "home": None,
-        "models": ["gpt-5.4"],
-        "default_model": "gpt-5.4",
+        "models": [],
+        "default_model": "",
         "approval_mode": "auto",
         "sandbox_mode": "workspace-write",
     },
@@ -32,19 +32,67 @@ DEFAULT_AGENT_PROFILES: list[dict[str, Any]] = [
         "mode": "auto",
         "command": "claude",
         "home": None,
-        "models": ["claude-sonnet-4-6"],
-        "default_model": "claude-sonnet-4-6",
+        "models": [],
+        "default_model": "",
         "permission_mode": "default",
         "launch_args": "",
+    },
+    {
+        "id": "cursor",
+        "agent": "cursor",
+        "name": "Cursor",
+        "mode": "auto",
+        "command": "agent",
+        "home": None,
+        "models": [],
+        "default_model": "",
+        "api_endpoint": "",
+    },
+    {
+        "id": "grok",
+        "agent": "grok",
+        "name": "Grok",
+        "mode": "auto",
+        "command": "grok",
+        "home": None,
+        "models": [],
+        "default_model": "",
+    },
+    {
+        "id": "opencode",
+        "agent": "opencode",
+        "name": "OpenCode",
+        "mode": "auto",
+        "command": "opencode",
+        "home": None,
+        "models": [],
+        "default_model": "",
+        "server_url": "",
+        "server_password": "",
     },
 ]
 
 _PROFILE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_VALID_AGENTS = {"codex", "claude_code"}
+_VALID_AGENTS = {"codex", "claude_code", "cursor", "grok", "opencode"}
 _VALID_MODES = {"auto", "enabled", "disabled"}
 _VALID_CODEX_APPROVAL = {"ask", "auto", "full"}
 _VALID_CODEX_SANDBOX = {"read-only", "workspace-write", "danger-full-access"}
 _VALID_CLAUDE_PERMISSION = {"default", "accept_edits", "bypass_permissions"}
+_AGENT_DEFAULTS: dict[str, dict[str, str]] = {
+    "codex": {"name": "Codex", "command": "codex", "model": ""},
+    "claude_code": {
+        "name": "Claude Code",
+        "command": "claude",
+        "model": "",
+    },
+    "cursor": {
+        "name": "Cursor",
+        "command": "agent",
+        "model": "",
+    },
+    "grok": {"name": "Grok", "command": "grok", "model": ""},
+    "opencode": {"name": "OpenCode", "command": "opencode", "model": ""},
+}
 
 
 def default_agent_profiles() -> list[dict[str, Any]]:
@@ -59,8 +107,8 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
 
     agent = str(profile.get("agent") or "").strip()
     if agent not in _VALID_AGENTS:
-        raise HTTPException(400, "agent must be codex or claude_code")
-    fallback_model = "gpt-5.4" if agent == "codex" else "claude-sonnet-4-6"
+        raise HTTPException(400, "agent must be codex, claude_code, cursor, grok, or opencode")
+    defaults = _AGENT_DEFAULTS[agent]
 
     mode = str(profile.get("mode") or "auto").strip()
     if mode not in _VALID_MODES:
@@ -68,11 +116,9 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
 
     command = str(profile.get("command") or "").strip()
     if not command:
-        command = "codex" if agent == "codex" else "claude"
+        command = defaults["command"]
 
-    name = str(profile.get("name") or "").strip() or (
-        "Codex" if agent == "codex" else "Claude Code"
-    )
+    name = str(profile.get("name") or "").strip() or defaults["name"]
     home = profile.get("home")
     if isinstance(home, str):
         home = home.strip() or None
@@ -81,23 +127,20 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
 
     models = profile.get("models")
     if not isinstance(models, list):
-        models = ["default"]
+        models = []
     normalized_models = []
     for model in models:
         if isinstance(model, str) and model.strip():
             model_id = model.strip()
             if model_id == "default":
                 continue
-            if "/" in model_id:
-                raise HTTPException(400, "agent model ids cannot contain '/'")
             normalized_models.append(model_id)
-    if not normalized_models:
-        normalized_models = [fallback_model]
-
-    default_model = str(profile.get("default_model") or normalized_models[0]).strip()
+    default_model = str(profile.get("default_model") or "").strip()
     if default_model == "default":
-        default_model = fallback_model
-    if default_model not in normalized_models:
+        default_model = ""
+    if normalized_models and not default_model:
+        default_model = normalized_models[0]
+    if normalized_models and default_model not in normalized_models:
         raise HTTPException(400, "agent default_model must be present in models")
 
     normalized: dict[str, Any] = {
@@ -126,7 +169,7 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
                 "sandbox_mode": sandbox_mode,
             }
         )
-    else:
+    elif agent == "claude_code":
         permission_mode = str(profile.get("permission_mode") or "default").strip()
         if permission_mode not in _VALID_CLAUDE_PERMISSION:
             raise HTTPException(
@@ -138,6 +181,11 @@ def normalize_agent_profile(raw: dict[str, Any]) -> dict[str, Any]:
                 "launch_args": str(profile.get("launch_args") or "").strip(),
             }
         )
+    elif agent == "cursor":
+        normalized["api_endpoint"] = str(profile.get("api_endpoint") or "").strip()
+    elif agent == "opencode":
+        normalized["server_url"] = str(profile.get("server_url") or "").strip()
+        normalized["server_password"] = str(profile.get("server_password") or "").strip()
 
     return normalized
 

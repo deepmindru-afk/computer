@@ -24,7 +24,7 @@ class ApiModelTarget:
 class AgentModelTarget:
     kind: Literal["agent"]
     profile_id: str
-    agent: Literal["codex", "claude_code"]
+    agent: Literal["codex", "claude_code", "cursor", "grok", "opencode"]
     model: str
     full_model_id: str
     config: dict[str, Any]

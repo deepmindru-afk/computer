@@ -60,7 +60,7 @@ export const updateConfig = (config: Record<string, unknown>) =>
 
 // ── Agents ─────────────────────────────────────────────────
 
-export type AgentType = 'codex' | 'claude_code';
+export type AgentType = 'codex' | 'claude_code' | 'cursor' | 'grok' | 'opencode';
 export type AgentMode = 'auto' | 'enabled' | 'disabled';
 export type AgentStatus = 'ready' | 'not_found' | 'missing_dependency' | 'auth_unknown' | 'error';
 
@@ -77,6 +77,9 @@ export interface AgentProfile {
 	sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access';
 	permission_mode?: 'default' | 'accept_edits' | 'bypass_permissions';
 	launch_args?: string;
+	api_endpoint?: string;
+	server_url?: string;
+	server_password?: string;
 }
 
 export interface AgentsResponseProfile {

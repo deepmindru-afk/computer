@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import os
 import re
 import shutil
+import socket
 from dataclasses import dataclass, asdict
+from contextlib import suppress
 from typing import Any
+
+import httpx
 
 from cptr.utils.agents.models import (
     default_agent_profiles,
@@ -54,12 +59,17 @@ def _resolve_command(command: str) -> str | None:
     return shutil.which(command)
 
 
-async def _run_probe(argv: list[str], timeout: float = 3.0) -> tuple[int, str]:
+async def _run_probe(
+    argv: list[str],
+    timeout: float = 3.0,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str]:
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
@@ -101,6 +111,51 @@ async def detect_profile(profile: dict[str, Any]) -> AgentDetection:
                 help_text or "codex app-server is unavailable",
             )
         models = await _probe_codex_models(command, profile)
+        return AgentDetection("ready", command, version, None, models)
+
+    if profile.get("agent") == "cursor":
+        about = await _probe_cursor_about(command, profile)
+        if about["status"] != "ready":
+            return AgentDetection(
+                about["status"],
+                command,
+                about.get("version"),
+                about.get("message"),
+                [],
+            )
+        models = await _probe_cursor_models(command, profile)
+        if not models:
+            return AgentDetection(
+                "auth_unknown",
+                command,
+                about.get("version"),
+                "Could not discover Cursor models. Check Cursor Agent login and CLI setup.",
+                [],
+            )
+        return AgentDetection("ready", command, about.get("version"), None, models)
+
+    if profile.get("agent") == "grok":
+        models = await _probe_grok_models(command, profile)
+        if not models:
+            return AgentDetection(
+                "auth_unknown",
+                command,
+                version,
+                "Could not discover Grok models. Check Grok login or XAI_API_KEY.",
+                [],
+            )
+        return AgentDetection("ready", command, version, None, models)
+
+    if profile.get("agent") == "opencode":
+        models = await _probe_opencode_models(command, profile)
+        if not models:
+            return AgentDetection(
+                "auth_unknown",
+                command,
+                version,
+                "Could not discover OpenCode models. Check connected OpenCode providers.",
+                [],
+            )
         return AgentDetection("ready", command, version, None, models)
 
     return AgentDetection("error", command, version, "Unknown agent")
@@ -168,6 +223,212 @@ async def _probe_codex_models(command: str, profile: dict[str, Any]) -> list[str
         await client.close()
 
 
+async def _probe_cursor_about(command: str, profile: dict[str, Any]) -> dict[str, Any]:
+    env = os.environ.copy()
+    if profile.get("home"):
+        env["HOME"] = os.path.expanduser(str(profile["home"]))
+    code, text = await _run_probe([command, "about", "--format", "json"], timeout=8, env=env)
+    if code != 0:
+        code, text = await _run_probe([command, "about"], timeout=8, env=env)
+    version = None
+    if text:
+        with suppress(Exception):
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                raw_version = parsed.get("cliVersion")
+                version = raw_version.strip() if isinstance(raw_version, str) else None
+                if parsed.get("userEmail") is None:
+                    return {
+                        "status": "auth_unknown",
+                        "version": version,
+                        "message": "Cursor Agent is not authenticated. Run `agent login`.",
+                    }
+                email = parsed.get("userEmail")
+                if isinstance(email, str) and email.strip():
+                    lower = email.strip().lower()
+                    if "not logged in" in lower or "login required" in lower:
+                        return {
+                            "status": "auth_unknown",
+                            "version": version,
+                            "message": "Cursor Agent is not authenticated. Run `agent login`.",
+                        }
+                    return {"status": "ready", "version": version, "message": None}
+        version_match = re.search(r"CLI Version\s+([^\n]+)", text)
+        if version_match:
+            version = version_match.group(1).strip()
+        email_match = re.search(r"User Email\s+([^\n]+)", text)
+        if email_match:
+            email = email_match.group(1).strip().lower()
+            if "not logged in" in email or "login required" in email:
+                return {
+                    "status": "auth_unknown",
+                    "version": version,
+                    "message": "Cursor Agent is not authenticated. Run `agent login`.",
+                }
+    if code != 0:
+        return {
+            "status": "error",
+            "version": version,
+            "message": text or "Failed to run Cursor Agent health check.",
+        }
+    return {"status": "ready", "version": version, "message": None}
+
+
+async def _probe_cursor_models(command: str, profile: dict[str, Any]) -> list[str] | None:
+    from cptr.utils.agents.acp import AcpClient
+
+    env = os.environ.copy()
+    if profile.get("home"):
+        env["HOME"] = os.path.expanduser(str(profile["home"]))
+    args = []
+    api_endpoint = str(profile.get("api_endpoint") or "").strip()
+    if api_endpoint:
+        args.extend(["-e", api_endpoint])
+    args.append("acp")
+    client = AcpClient(
+        command=command,
+        args=args,
+        cwd=os.getcwd(),
+        env=env,
+        auth_method_id="cursor_login",
+        client_capabilities={"_meta": {"parameterizedModelPicker": True}},
+    )
+    try:
+        await asyncio.wait_for(client.start(), timeout=10)
+        result = await asyncio.wait_for(client.request("cursor/list_available_models", {}), timeout=5)
+        models = []
+        for item in result.get("models") or []:
+            if isinstance(item, dict) and isinstance(item.get("value"), str):
+                models.append(item["value"].strip())
+        return [model for model in models if model] or None
+    except Exception:
+        return None
+    finally:
+        await client.close()
+
+
+async def _probe_grok_models(command: str, profile: dict[str, Any]) -> list[str] | None:
+    from cptr.utils.agents.acp import AcpClient, acp_models_from_setup
+
+    env = os.environ.copy()
+    if profile.get("home"):
+        env["HOME"] = os.path.expanduser(str(profile["home"]))
+    env["GROK_OAUTH2_REFERRER"] = "cptr"
+    auth_method_id = "xai.api_key" if env.get("XAI_API_KEY", "").strip() else "cached_token"
+    client = AcpClient(
+        command=command,
+        args=["agent", "stdio"],
+        cwd=os.getcwd(),
+        env=env,
+        auth_method_id=auth_method_id,
+    )
+    try:
+        await asyncio.wait_for(client.start(), timeout=10)
+        return acp_models_from_setup(client.setup_result) or None
+    except Exception:
+        return None
+    finally:
+        await client.close()
+
+
+async def _probe_opencode_models(command: str, profile: dict[str, Any]) -> list[str] | None:
+    env = os.environ.copy()
+    if profile.get("home"):
+        env["HOME"] = os.path.expanduser(str(profile["home"]))
+    server_url = str(profile.get("server_url") or "").strip()
+    password = str(profile.get("server_password") or "").strip()
+    proc: asyncio.subprocess.Process | None = None
+    try:
+        if not server_url:
+            port = _free_port()
+            proc = await asyncio.create_subprocess_exec(
+                command,
+                "serve",
+                "--hostname=127.0.0.1",
+                f"--port={port}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**env, "OPENCODE_CONFIG_CONTENT": "{}"},
+            )
+            server_url = await _read_opencode_server_url(proc, port)
+        async with httpx.AsyncClient(base_url=server_url, timeout=5) as client:
+            headers = {}
+            if password:
+                import base64
+
+                token = base64.b64encode(f"opencode:{password}".encode()).decode()
+                headers["Authorization"] = f"Basic {token}"
+            providers = await _opencode_json(client, ["provider.list", "provider/list", "provider"], headers)
+            provider_list = providers.get("data") if isinstance(providers.get("data"), dict) else providers
+            connected = set(provider_list.get("connected") or [])
+            all_providers = provider_list.get("all") or []
+            models: list[str] = []
+            for provider in all_providers:
+                if not isinstance(provider, dict):
+                    continue
+                provider_id = provider.get("id")
+                if not isinstance(provider_id, str) or provider_id not in connected:
+                    continue
+                raw_models = provider.get("models")
+                if isinstance(raw_models, dict):
+                    for model_id in raw_models:
+                        if isinstance(model_id, str) and model_id.strip():
+                            models.append(f"{provider_id}/{model_id.strip()}")
+            return models or None
+    except Exception:
+        return None
+    finally:
+        if proc and proc.returncode is None:
+            proc.terminate()
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=2)
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+async def _read_opencode_server_url(proc: asyncio.subprocess.Process, port: int) -> str:
+    assert proc.stdout is not None
+    fallback = f"http://127.0.0.1:{port}"
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        line = await asyncio.wait_for(proc.stdout.readline(), timeout=1)
+        if not line:
+            break
+        text = line.decode(errors="replace").strip()
+        match = re.search(r"(https?://[^\s]+)", text)
+        if match:
+            return match.group(1)
+    return fallback
+
+
+async def _opencode_json(
+    client: httpx.AsyncClient,
+    paths: list[str],
+    headers: dict[str, str],
+) -> dict[str, Any]:
+    last_error = None
+    for path in paths:
+        try:
+            response = await client.get(f"/{path}", headers=headers)
+            if response.status_code == 405:
+                response = await client.post(f"/{path}", headers=headers, json={})
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:  # noqa: BLE001 - try alternate generated route names.
+            last_error = exc
+    if last_error:
+        raise last_error
+    return {}
+
+
 async def get_agent_status(app_state=None, refresh: bool = False) -> dict[str, Any]:
     now = asyncio.get_running_loop().time()
     cache = getattr(app_state, "AGENTS", None) if app_state is not None else None
@@ -186,11 +447,15 @@ async def get_agent_status(app_state=None, refresh: bool = False) -> dict[str, A
         if implicit_defaults and detected.status == "not_found":
             continue
         mode = profile.get("mode", "auto")
-        available = mode != "disabled" and (mode != "auto" or detected.status == "ready")
-        models = detected.models or profile.get("models") or ["default"]
+        models = detected.models or profile.get("models") or []
+        available = (
+            mode != "disabled"
+            and bool(models)
+            and (mode != "auto" or detected.status == "ready")
+        )
         effective_profile = dict(profile)
         effective_profile["models"] = models
-        if effective_profile.get("default_model") not in models:
+        if models and effective_profile.get("default_model") not in models:
             effective_profile["default_model"] = models[0]
         entries.append(
             {
@@ -223,7 +488,7 @@ async def get_available_agent_model_entries(app_state=None) -> list[dict[str, st
         if not profile["available"]:
             continue
         config = profile["config"]
-        for model in config.get("models") or ["default"]:
+        for model in config.get("models") or []:
             model_id = model_id_for_profile(config, model)
             entries.append(
                 {

@@ -1208,6 +1208,9 @@ async def run_chat_task(
         nonlocal content, text_buffer
         from cptr.utils.agents.claude_code import run_claude_code_agent
         from cptr.utils.agents.codex import run_codex_agent
+        from cptr.utils.agents.cursor import run_cursor_agent
+        from cptr.utils.agents.grok import run_grok_agent
+        from cptr.utils.agents.opencode import run_opencode_agent
 
         chat_obj = await Chat.get_by_id(chat_id)
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
@@ -1237,7 +1240,16 @@ async def run_chat_task(
                 if isinstance(candidate, dict):
                     resume_state = candidate
 
-        runner = run_codex_agent if agent_target.agent == "codex" else run_claude_code_agent
+        runners = {
+            "codex": run_codex_agent,
+            "claude_code": run_claude_code_agent,
+            "cursor": run_cursor_agent,
+            "grok": run_grok_agent,
+            "opencode": run_opencode_agent,
+        }
+        runner = runners.get(agent_target.agent)
+        if runner is None:
+            raise RuntimeError(f"Unsupported agent type: {agent_target.agent}")
         reasoning_buffer = ""
         async for event in runner(
             profile=agent_target.config,

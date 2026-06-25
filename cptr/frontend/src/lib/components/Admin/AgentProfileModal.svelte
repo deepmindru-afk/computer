@@ -17,32 +17,48 @@
 	// svelte-ignore state_referenced_locally
 	let draft = $state<AgentProfile>({
 		...profile,
-		models: [...(profile.models?.length ? profile.models : ['default'])]
+		models: [...(profile.models?.length ? profile.models : [])]
 	});
 
 	function normalizeDraft(): AgentProfile {
-		const fallbackModel = draft.agent === 'codex' ? 'gpt-5.4' : 'claude-sonnet-4-6';
 		const currentModels = draft.models?.map((model) => model.trim()).filter(Boolean) || [];
-		const models =
-			currentModels.length === 1 && currentModels[0] === 'default'
-				? [fallbackModel]
-				: currentModels.length
-					? currentModels
-					: [fallbackModel];
-		const defaultModel =
-			draft.default_model !== 'default' && models.includes(draft.default_model)
-				? draft.default_model
-				: models[0];
+		const models = currentModels.filter((model) => model !== 'default');
+		const defaultModel = models.includes(draft.default_model)
+			? draft.default_model
+			: models[0] || '';
 		return {
 			...draft,
 			id: draft.id.trim(),
 			name: draft.name.trim() || draft.id.trim(),
-			command: draft.command.trim() || (draft.agent === 'codex' ? 'codex' : 'claude'),
+			command: draft.command.trim() || defaultCommand(draft.agent),
 			home: draft.home?.trim() || null,
 			models,
 			default_model: defaultModel,
-			launch_args: draft.launch_args?.trim() || ''
+			launch_args: draft.launch_args?.trim() || '',
+			api_endpoint: draft.api_endpoint?.trim() || '',
+			server_url: draft.server_url?.trim() || '',
+			server_password: draft.server_password?.trim() || ''
 		};
+	}
+
+	function defaultCommand(agent: AgentProfile['agent']): string {
+		return {
+			codex: 'codex',
+			claude_code: 'claude',
+			cursor: 'agent',
+			grok: 'grok',
+			opencode: 'opencode'
+		}[agent];
+	}
+
+	function defaultName(agent: AgentProfile['agent']): string {
+		return {
+			codex: 'Codex',
+			claude_code: 'Claude Code',
+			cursor: 'Cursor',
+			grok: 'Grok',
+			opencode: 'OpenCode'
+		}[agent];
 	}
 </script>
 
@@ -89,14 +105,14 @@
 					id={`${fieldPrefix}-type`}
 					value={draft.agent}
 					onchange={(e) => {
-						const agent = e.currentTarget.value as 'codex' | 'claude_code';
-						const defaultModel = agent === 'codex' ? 'gpt-5.4' : 'claude-sonnet-4-6';
+						const agent = e.currentTarget.value as AgentProfile['agent'];
 						draft = {
 							...draft,
 							agent,
-							command: agent === 'codex' ? 'codex' : 'claude',
-							models: [defaultModel],
-							default_model: defaultModel,
+							name: defaultName(agent),
+							command: defaultCommand(agent),
+							models: [],
+							default_model: '',
 							approval_mode: draft.approval_mode || 'auto',
 							sandbox_mode: draft.sandbox_mode || 'workspace-write',
 							permission_mode: draft.permission_mode || 'default',
@@ -107,6 +123,9 @@
 				>
 					<option value="codex">Codex</option>
 					<option value="claude_code">Claude Code</option>
+					<option value="cursor">Cursor</option>
+					<option value="grok">Grok</option>
+					<option value="opencode">OpenCode</option>
 				</select>
 			</div>
 		</div>
@@ -130,7 +149,7 @@
 			id={`${fieldPrefix}-command`}
 			type="text"
 			bind:value={draft.command}
-			placeholder={draft.agent === 'codex' ? 'codex' : 'claude'}
+			placeholder={defaultCommand(draft.agent)}
 			autocomplete="off"
 			spellcheck="false"
 			class="block w-full bg-transparent text-[13px] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
@@ -161,6 +180,58 @@
 				id={`${fieldPrefix}-launch-args`}
 				type="text"
 				bind:value={draft.launch_args}
+				autocomplete="off"
+				spellcheck="false"
+				class="block w-full bg-transparent text-[13px] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+			/>
+		{/if}
+
+		{#if draft.agent === 'cursor'}
+			<label
+				for={`${fieldPrefix}-api-endpoint`}
+				class="text-[10px] text-gray-400 dark:text-gray-600 mt-2"
+			>
+				{$t('admin.agentsApiEndpoint')}
+			</label>
+			<input
+				id={`${fieldPrefix}-api-endpoint`}
+				type="text"
+				bind:value={draft.api_endpoint}
+				placeholder="Optional"
+				autocomplete="off"
+				spellcheck="false"
+				class="block w-full bg-transparent text-[13px] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+			/>
+		{/if}
+
+		{#if draft.agent === 'opencode'}
+			<label
+				for={`${fieldPrefix}-server-url`}
+				class="text-[10px] text-gray-400 dark:text-gray-600 mt-2"
+			>
+				{$t('admin.agentsServerUrl')}
+			</label>
+			<input
+				id={`${fieldPrefix}-server-url`}
+				type="text"
+				bind:value={draft.server_url}
+				placeholder="Optional"
+				autocomplete="off"
+				spellcheck="false"
+				class="block w-full bg-transparent text-[13px] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
+			/>
+
+			<label
+				for={`${fieldPrefix}-server-password`}
+				class="text-[10px] text-gray-400 dark:text-gray-600 mt-2"
+			>
+				{$t('admin.agentsServerPassword')}
+			</label>
+			<input
+				id={`${fieldPrefix}-server-password`}
+				type="password"
+				bind:value={draft.server_password}
+				placeholder="Optional"
 				autocomplete="off"
 				spellcheck="false"
 				class="block w-full bg-transparent text-[13px] text-gray-700 dark:text-gray-300 placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-none py-0.5 font-mono"
