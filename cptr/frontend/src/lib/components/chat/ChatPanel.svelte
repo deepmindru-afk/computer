@@ -228,6 +228,7 @@
 
 		return path;
 	});
+	const activePathIds = $derived(new Set(activePath.map(({ msg }) => msg.id)));
 
 	// ── Visible slice of the active path ────────────────────────
 	const hasHiddenMessages = $derived(activePath.length > visibleCount);
@@ -286,7 +287,12 @@
 	// Queued messages: user-authored messages waiting behind an active response.
 	const queuedMessages = $derived(
 		allMessages
-			.filter((m) => m.role === 'user' && m.meta?.queued)
+			.filter(
+				(m) =>
+					m.role === 'user' &&
+					m.meta?.queued &&
+					(m.parent_id ? activePathIds.has(m.parent_id) : activePath.length === 0)
+			)
 			.map((m) => ({ id: m.id, content: m.content }))
 	);
 
@@ -715,7 +721,10 @@
 							}
 						];
 					} else if (result.assistant_message) {
-						allMessages = [...allMessages, result.assistant_message];
+						const newMessages = result.user_message
+							? [result.user_message, result.assistant_message]
+							: [result.assistant_message];
+						allMessages = [...allMessages, ...newMessages];
 						currentMessageId = result.message_id;
 					}
 				} catch (e) {

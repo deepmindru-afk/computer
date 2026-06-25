@@ -8,10 +8,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 
 from cptr.env import CHAT_MAX_ITERATIONS, CHAT_TOOL_MAX_CHARS
-from cptr.utils.context import should_compact
+from cptr.utils.context import resolve_compact_token_threshold, should_compact
 from cptr.utils.skills import discover_skills, load_skill, format_skill_content
 from cptr.utils.summarize import summarize_messages
 from cptr.models import Chat, ChatMessage, Config
@@ -102,6 +103,33 @@ def get_active_chat_ids() -> set[str]:
     return {cid for mid, cid in _task_chat.items() if mid in _tasks and not _tasks[mid].done()}
 
 
+def _plain_message_text(content) -> str:
+    if isinstance(content, list):
+        return " ".join(
+            str(block.get("text", ""))
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return str(content or "")
+
+
+def _memory_recall_inputs(
+    messages: list[dict],
+    regeneration_prompt: str | None = None,
+) -> tuple[str, list[str]]:
+    current_message = regeneration_prompt or ""
+    if not current_message:
+        for message in reversed(messages):
+            if message.get("role") == "user":
+                current_message = _plain_message_text(message.get("content"))
+                break
+    mentioned_files = re.findall(
+        r"(?:^|\s)([./~]?[A-Za-z0-9_.\-/]+(?:\.[A-Za-z0-9_]+))",
+        current_message,
+    )[:12]
+    return current_message, mentioned_files
+
+
 # ── Pending input processing ────────────────────────────────
 
 
@@ -141,19 +169,6 @@ def _is_pending_chat_input(message: ChatMessage) -> bool:
     return bool(meta.get("queued") or meta.get("async_subagent_pending"))
 
 
-def _first_pending_input_batch(messages: list[ChatMessage]) -> list[ChatMessage]:
-    if not messages:
-        return []
-
-    first_is_internal_subagent_result = _is_pending_internal_subagent_result(messages[0])
-    batch = []
-    for message in messages:
-        if _is_pending_internal_subagent_result(message) != first_is_internal_subagent_result:
-            break
-        batch.append(message)
-    return batch
-
-
 def _merge_pending_input_meta(messages: list[ChatMessage]) -> dict | None:
     async_meta = _merge_async_subagent_result_meta(messages)
     if async_meta:
@@ -169,23 +184,40 @@ def _merge_pending_input_meta(messages: list[ChatMessage]) -> dict | None:
     return {"files": files} if files else None
 
 
-def select_pending_input_parent_id(
-    messages: list[ChatMessage],
-    current_message_id: str | None,
-    fallback_parent_id: str | None = None,
-) -> str | None:
-    """Choose the visible assistant leaf that pending input should follow."""
-    msg_map = {m.id: m for m in messages}
-    cur = msg_map.get(current_message_id) if current_message_id else None
-    seen: set[str] = set()
-    while cur and cur.id not in seen:
-        seen.add(cur.id)
-        if cur.role == "assistant" and cur.done:
-            return cur.id
-        cur = msg_map.get(cur.parent_id) if cur.parent_id else None
+def _pending_input_ready(message: ChatMessage, msg_map: dict[str, ChatMessage]) -> bool:
+    parent = msg_map.get(message.parent_id) if message.parent_id else None
+    return not (parent and parent.role == "assistant" and not parent.done)
 
-    done_assistants = [m for m in messages if m.role == "assistant" and m.done]
-    return done_assistants[-1].id if done_assistants else fallback_parent_id
+
+def _first_ready_pending_input_batch(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Return the first ready pending batch on a single branch."""
+    msg_map = {m.id: m for m in messages}
+    pending_inputs = [m for m in messages if m.role == "user" and _is_pending_chat_input(m)]
+    if not pending_inputs:
+        return []
+
+    first = next((m for m in pending_inputs if _pending_input_ready(m, msg_map)), None)
+    if not first:
+        return []
+
+    first_is_internal_subagent_result = _is_pending_internal_subagent_result(first)
+    batch = []
+    for message in pending_inputs:
+        if message is first:
+            batch.append(message)
+            continue
+        if not batch:
+            continue
+        if message.parent_id != first.parent_id:
+            break
+        if message.model != first.model:
+            break
+        if _is_pending_internal_subagent_result(message) != first_is_internal_subagent_result:
+            break
+        if not _pending_input_ready(message, msg_map):
+            break
+        batch.append(message)
+    return batch
 
 
 async def process_pending_chat_inputs(chat_id: str, user_id: str, workspace: str):
@@ -196,101 +228,93 @@ async def process_pending_chat_inputs(chat_id: str, user_id: str, workspace: str
     """
     lock = get_pending_input_lock(chat_id)
     async with lock:
-        all_msgs = await ChatMessage.get_all_by_chat(chat_id)
+        while True:
+            all_msgs = await ChatMessage.get_all_by_chat(chat_id)
 
-        # Wait until the parent assistant turn is idle.
-        if any(m.role == "assistant" and not m.done for m in all_msgs):
-            return
+            input_batch = _first_ready_pending_input_batch(all_msgs)
+            if not input_batch:
+                return
 
-        pending_inputs = [m for m in all_msgs if m.role == "user" and _is_pending_chat_input(m)]
-        if not pending_inputs:
-            return
-        input_batch = _first_pending_input_batch(pending_inputs)
+            combined_content = "\n\n".join(m.content for m in input_batch if m.content)
+            combined_meta = _merge_pending_input_meta(input_batch)
 
-        combined_content = "\n\n".join(m.content for m in input_batch if m.content)
-        combined_meta = _merge_pending_input_meta(input_batch)
+            chat = await Chat.get_by_id(chat_id)
+            if not chat:
+                return
 
-        chat = await Chat.get_by_id(chat_id)
-        if not chat:
-            return
+            parent_id = input_batch[0].parent_id
 
-        parent_id = select_pending_input_parent_id(
-            all_msgs,
-            chat.current_message_id,
-            input_batch[0].parent_id,
-        )
+            for m in input_batch:
+                await ChatMessage.delete(m.id)
 
-        for m in input_batch:
-            await ChatMessage.delete(m.id)
-
-        combined_msg = await ChatMessage.create(
-            chat_id=chat_id,
-            role="user",
-            content=combined_content,
-            parent_id=parent_id,
-            meta=combined_meta,
-            created_at=now_ms(),
-        )
-
-        # Resolve model from the chat's last used model
-        model_id = (chat.meta or {}).get("last_model", "")
-        if not model_id:
-            # Fall back to the model from the last assistant message
-            done_assistants = [m for m in all_msgs if m.role == "assistant" and m.done]
-            last_asst = done_assistants[-1] if done_assistants else None
-            model_id = (last_asst.model if last_asst else "") or ""
-        if not model_id:
-            logger.error(
-                "[chat-input] No model found for chat %s, cannot process pending input",
-                chat_id,
+            combined_msg = await ChatMessage.create(
+                chat_id=chat_id,
+                role="user",
+                content=combined_content,
+                parent_id=parent_id,
+                meta=combined_meta,
+                created_at=now_ms(),
             )
-            return
 
-        # Resolve connection
-        try:
-            from cptr.routers.chat import _resolve_connection
+            # Resolve model from the queued input, then the chat's last used model.
+            model_id = input_batch[0].model or (chat.meta or {}).get("last_model", "")
+            if not model_id:
+                # Fall back to the model from the last assistant message
+                done_assistants = [m for m in all_msgs if m.role == "assistant" and m.done]
+                last_asst = done_assistants[-1] if done_assistants else None
+                model_id = (last_asst.model if last_asst else "") or ""
+            if not model_id:
+                logger.error(
+                    "[chat-input] No model found for chat %s, cannot process pending input",
+                    chat_id,
+                )
+                return
 
-            connection, bare_model = await _resolve_connection(model_id)
-        except Exception:
-            logger.exception("[chat-input] Failed to resolve connection for model %s", model_id)
-            return
+            # Resolve connection
+            try:
+                from cptr.routers.chat import _resolve_connection
 
-        # Create assistant placeholder
-        assistant_msg = await ChatMessage.create(
-            chat_id=chat_id,
-            role="assistant",
-            content="",
-            parent_id=combined_msg.id,
-            model=model_id,
-            done=False,
-            created_at=now_ms(),
-        )
-        await Chat.update_current_message(chat_id, assistant_msg.id, now_ms())
+                connection, bare_model = await _resolve_connection(model_id)
+            except Exception:
+                logger.exception("[chat-input] Failed to resolve connection for model %s", model_id)
+                return
 
-        # Notify frontend that pending inputs became transcript messages.
-        await emit_to_user(
-            user_id,
-            {
-                "chat_id": chat_id,
-                "message_id": assistant_msg.id,
-                "pending_inputs_processed": True,
-            },
-        )
+            # Create assistant placeholder
+            assistant_msg = await ChatMessage.create(
+                chat_id=chat_id,
+                role="assistant",
+                content="",
+                parent_id=combined_msg.id,
+                model=model_id,
+                done=False,
+                created_at=now_ms(),
+            )
+            await Chat.update_current_message(chat_id, assistant_msg.id, now_ms())
 
-        # Start new task
-        start_task(
-            message_id=assistant_msg.id,
-            chat_id=chat_id,
-            user_id=user_id,
-            connection=connection,
-            workspace=workspace,
-            model=bare_model,
-        )
-        logger.info(
-            "[chat-input] Processed %d pending input message(s) for chat %s",
-            len(input_batch),
-            chat_id[:8],
-        )
+            # Notify frontend that pending inputs became transcript messages.
+            await emit_to_user(
+                user_id,
+                {
+                    "chat_id": chat_id,
+                    "message_id": assistant_msg.id,
+                    "pending_inputs_processed": True,
+                },
+            )
+
+            # Start new task and continue draining other ready branch batches.
+            start_task(
+                message_id=assistant_msg.id,
+                chat_id=chat_id,
+                user_id=user_id,
+                connection=connection,
+                workspace=workspace,
+                model=bare_model,
+            )
+            logger.info(
+                "[chat-input] Processed %d pending input message(s) for chat %s",
+                len(input_batch),
+                chat_id[:8],
+            )
 
 
 async def reconcile_chat_state():
@@ -1083,6 +1107,11 @@ async def run_chat_task(
 
     # Load existing state so continuations don't overwrite previous output
     msg = await ChatMessage.get_by_id(message_id)
+    summary_message_id = message_id
+    if msg and msg.parent_id:
+        parent_msg = await ChatMessage.get_by_id(msg.parent_id)
+        if parent_msg and parent_msg.role == "user":
+            summary_message_id = parent_msg.id
     content = (msg.content or "") if msg else ""
     output_items: list[dict] = list(msg.output or []) if msg else []
     text_buffer = ""  # Accumulates text between tool calls
@@ -1149,8 +1178,17 @@ async def run_chat_task(
 
         chat_obj = await Chat.get_by_id(chat_id)
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
-        system = await _load_system_prompt(workspace, model, user_id=user_id)
+        configured_model = (msg.model if msg else None) or model
         messages, loaded_summary = await _load_message_history(chat_id, message_id)
+        memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
+        system = await _load_system_prompt(
+            workspace,
+            model,
+            user_id=user_id,
+            current_message=memory_message,
+            recent_messages=messages,
+            mentioned_files=memory_files,
+        )
         if loaded_summary:
             system += f"\n\n[CONVERSATION SUMMARY]\n{loaded_summary}"
         if regeneration_prompt:
@@ -1175,7 +1213,8 @@ async def run_chat_task(
                 import re as _re
 
                 mentioned = _re.findall(
-                    r"\$([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)", last_user["content"]
+                    r"\$([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)",
+                    _plain_message_text(last_user.get("content")),
                 )
                 skill_names = {s.name for s in skills}
                 attached_skill_ids = [m for m in mentioned if m in skill_names]
@@ -1222,17 +1261,28 @@ async def run_chat_task(
         chat_request_params = chat_params.get("request_params") or {}
         global_rp = {}
         model_rp = {}
+        compact_token_threshold = None
         try:
             chat_models_config = await Config.get("chat.models") or {}
             global_rp = chat_models_config.get("*", {}).get("params", {}).get("request_params", {})
             model_rp = chat_models_config.get(model, {}).get("params", {}).get("request_params", {})
+            compact_token_threshold = resolve_compact_token_threshold(
+                configured_model, chat_models_config=chat_models_config
+            )
         except Exception:
             pass
+        compact_token_threshold = compact_token_threshold or resolve_compact_token_threshold()
         request_params = {**global_rp, **model_rp, **chat_request_params} or None
 
         for _iteration in range(CHAT_MAX_ITERATIONS):
             # ── Context compaction: summarize older messages if too large ──
-            if should_compact(messages, system, last_usage, new_messages_since):
+            if should_compact(
+                messages,
+                system,
+                last_usage,
+                new_messages_since,
+                threshold=compact_token_threshold,
+            ):
                 target_keep = max(2, len(messages) * 2 // 5)
                 split_idx = _find_safe_split(messages, target_keep)
                 drop_zone = messages[:split_idx]
@@ -1249,12 +1299,19 @@ async def run_chat_task(
                     api_type=api_type,
                 )
 
-                # Store on the current message — this IS the cutoff
-                await ChatMessage.update(message_id, chat_summary=summary)
+                await ChatMessage.update(summary_message_id, chat_summary=summary)
                 loaded_summary = summary
 
                 # Append summary to system prompt (works for all providers)
-                system = await _load_system_prompt(workspace, model, user_id=user_id)
+                memory_message, memory_files = _memory_recall_inputs(keep_zone, regeneration_prompt)
+                system = await _load_system_prompt(
+                    workspace,
+                    model,
+                    user_id=user_id,
+                    current_message=memory_message,
+                    recent_messages=keep_zone,
+                    mentioned_files=memory_files,
+                )
                 system += f"\n\n[CONVERSATION SUMMARY]\n{summary}"
                 # Re-inject attached skills after compaction (protect from pruning)
                 if attached_skill_ids:
@@ -1271,8 +1328,9 @@ async def run_chat_task(
                 new_messages_since = 0
 
                 logger.info(
-                    "[task %s] compacted: dropped %d msgs, kept %d, summary=%d chars",
+                    "[task %s] compacted: checkpoint=%s dropped %d msgs, kept %d, summary=%d chars",
                     message_id[:8],
+                    summary_message_id[:8],
                     len(drop_zone),
                     len(keep_zone),
                     len(summary),

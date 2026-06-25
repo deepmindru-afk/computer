@@ -341,8 +341,8 @@
 			});
 		} else if (workspacePath && workspacePath === lastLoadedPath) {
 			// Same workspace — process intents immediately
-			processIntentParams();
-		} else if (!wsPath) {
+			if (get(currentWorkspace)?.path === workspacePath) processIntentParams();
+		} else if (!workspacePath) {
 			lastLoadedPath = null;
 			currentWorkspace.set(null);
 			processIntentParams();

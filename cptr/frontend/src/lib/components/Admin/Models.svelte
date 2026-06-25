@@ -24,6 +24,7 @@
 		is_active: boolean;
 		rows: ParamRow[];
 		systemPrompt: string;
+		compactTokenThreshold: number | null;
 		dirty: boolean;
 	};
 
@@ -35,6 +36,7 @@
 
 	let globalRows = $state<ParamRow[]>([]);
 	let globalSystemPrompt = $state('');
+	let globalCompactTokenThreshold = $state<number | null>(null);
 	let globalDirty = $state(false);
 	let globalExpanded = $state(false);
 	let showVariables = $state(false);
@@ -87,6 +89,12 @@ Files:
 		}));
 	}
 
+	function parseCompactTokenThreshold(config: ModelConfigEntry | undefined): number | null {
+		const value = config?.params?.compact_token_threshold;
+		const threshold = typeof value === 'number' ? value : Number(value);
+		return Number.isFinite(threshold) && threshold > 0 ? Math.floor(threshold) : null;
+	}
+
 	function rowsToRequestParams(rows: ParamRow[]): Record<string, unknown> {
 		const result: Record<string, unknown> = {};
 		for (const { key, value } of rows) {
@@ -110,7 +118,9 @@ Files:
 		if (!preserveDirty || !globalDirty) {
 			globalRows = parseRows(config['*']);
 			globalSystemPrompt = config['*']?.params?.system_prompt || '';
-			globalExpanded = globalRows.length > 0 || !!globalSystemPrompt;
+			globalCompactTokenThreshold = parseCompactTokenThreshold(config['*']);
+			globalExpanded =
+				globalRows.length > 0 || !!globalSystemPrompt || globalCompactTokenThreshold !== null;
 		}
 
 		models = data.models.map((m) => {
@@ -125,6 +135,7 @@ Files:
 				is_active: mc?.is_active !== false,
 				rows: parseRows(mc),
 				systemPrompt: (mc?.params as any)?.system_prompt || '',
+				compactTokenThreshold: parseCompactTokenThreshold(mc),
 				dirty: false
 			};
 		});
@@ -183,11 +194,23 @@ Files:
 		}
 	}
 
-	function buildParams(rows: ParamRow[], systemPrompt: string): Record<string, unknown> {
+	function readThresholdInput(e: Event): number | null {
+		const value = (e.target as HTMLInputElement).value;
+		if (!value.trim()) return null;
+		const threshold = Number(value);
+		return Number.isFinite(threshold) && threshold > 0 ? Math.floor(threshold) : null;
+	}
+
+	function buildParams(
+		rows: ParamRow[],
+		systemPrompt: string,
+		compactThreshold: number | null
+	): Record<string, unknown> {
 		const params: Record<string, unknown> = {};
 		const rp = rowsToRequestParams(rows);
 		if (Object.keys(rp).length) params.request_params = rp;
 		if (systemPrompt.trim()) params.system_prompt = systemPrompt.trim();
+		if (compactThreshold && compactThreshold > 0) params.compact_token_threshold = compactThreshold;
 		return params;
 	}
 
@@ -198,7 +221,7 @@ Files:
 			if (globalDirty) {
 				promises.push(
 					updateModelConfig('*', {
-						params: buildParams(globalRows, globalSystemPrompt)
+						params: buildParams(globalRows, globalSystemPrompt, globalCompactTokenThreshold)
 					})
 				);
 			}
@@ -206,7 +229,7 @@ Files:
 				if (model.dirty) {
 					promises.push(
 						updateModelConfig(model.id, {
-							params: buildParams(model.rows, model.systemPrompt)
+							params: buildParams(model.rows, model.systemPrompt, model.compactTokenThreshold)
 						})
 					);
 				}
@@ -328,6 +351,34 @@ Files:
 	</div>
 {/snippet}
 
+{#snippet compactThresholdField(
+	inputId: string,
+	value: number | null,
+	onInput: (value: number | null) => void
+)}
+	<div class="mb-2">
+		<label
+			class="text-[10px] text-gray-400 dark:text-gray-600 uppercase tracking-wide"
+			for={inputId}>{$t('admin.compactTokenThreshold')}</label
+		>
+		<div class="flex items-center gap-1.5 mt-1">
+			<input
+				id={inputId}
+				type="number"
+				value={value ?? ''}
+				oninput={(e) => onInput(readThresholdInput(e))}
+				min="1"
+				step="1"
+				placeholder={$t('admin.compactTokenThreshold')}
+				class="w-24 h-7 px-2 rounded-lg text-xs bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-white/8 outline-none focus:border-blue-400 dark:focus:border-blue-500 transition-colors"
+			/>
+			<span class="text-[11px] text-gray-400 dark:text-gray-600"
+				>{$t('admin.compactTokenThresholdUnit')}</span
+			>
+		</div>
+	</div>
+{/snippet}
+
 <div class="flex flex-col h-full">
 	{#if loading}
 		<div class="flex justify-center py-8"><Spinner size={16} /></div>
@@ -412,6 +463,14 @@ Files:
 			</button>
 
 			{#if globalExpanded}
+				{@render compactThresholdField(
+					'global-compact-threshold',
+					globalCompactTokenThreshold,
+					(value) => {
+						globalCompactTokenThreshold = value;
+						globalDirty = true;
+					}
+				)}
 				{@render systemPromptField(
 					globalSystemPrompt,
 					(v) => {
@@ -470,6 +529,14 @@ Files:
 				</button>
 
 				{#if selectedId === model.id}
+					{@render compactThresholdField(
+						`model-${model.id}-compact-threshold`,
+						model.compactTokenThreshold,
+						(value) => {
+							model.compactTokenThreshold = value;
+							model.dirty = true;
+						}
+					)}
 					{@render systemPromptField(
 						model.systemPrompt,
 						(v) => {

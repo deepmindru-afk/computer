@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-06-25
+
+### Added
+
+- 🗄️ **Memory vault.** Memories are now stored as organized Markdown files instead of a flat list. Related memories can be grouped under headings, linked together across files, and browsed from the new memory file browser and search endpoints. The AI can also link, move, split, and merge memories to keep things tidy over time.
+- 🔍 **Memory search and file browsing.** New API endpoints let you search across all stored memories, list memory files with their headings, read individual files, and run a safety review of the vault.
+- 🧠 **Smarter memory recall.** When building context for a conversation, the AI now pulls in relevant memories based on what you are actually talking about, not just the full baseline list. Mentioned files and recent messages help guide which memories surface.
+- ⚙️ **Per-model context compaction threshold.** You can now set a custom compaction threshold for each model from the Models admin page. Useful for models with smaller context windows that need to compact earlier. The global threshold still acts as an upper limit.
+
+### Changed
+
+- 💬 **Queued messages follow the active branch.** Queued messages now only appear if they belong to the branch you are currently viewing, instead of showing every queued message regardless of branch.
+- 📝 **Conversation summaries saved in the right place.** When a long conversation gets compacted, the summary is now stored on the user's message instead of the assistant's, so it sticks around even if you regenerate a response.
+- 🔄 **Pending input handling improved.** When processing queued user messages, the system now cancels any unfinished parent response before starting the new one, and picks the right model more reliably.
+- 🧹 **Workspace navigation edge case fixed.** Switching between workspaces with deep links no longer occasionally processes navigation actions before the workspace has fully loaded.
+
 ## [0.6.1] - 2026-06-20
 
 ### Added

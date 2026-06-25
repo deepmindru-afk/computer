@@ -322,11 +322,13 @@ async def _get_chat_context_usage(chat, model_id: str | None = None) -> dict | N
         build_context_usage,
         estimate_context_usage,
         estimate_messages_tokens,
+        load_compact_token_threshold,
     )
 
     messages, existing_summary = await _load_message_history(chat.id, message_id)
     workspace = (chat.meta or {}).get("workspace", "")
     model = model_id or await _infer_chat_model(chat.id)
+    compact_token_threshold = await load_compact_token_threshold(model)
     system = await _load_system_prompt(workspace, model or "", user_id=chat.user_id)
     if existing_summary:
         system += f"\n\n[CONVERSATION SUMMARY]\n{existing_summary}"
@@ -341,9 +343,11 @@ async def _get_chat_context_usage(chat, model_id: str | None = None) -> dict | N
                 tokens += estimate_messages_tokens(
                     [{"role": m.role, "content": m.content or ""} for m in trailing_messages]
                 )
-            return build_context_usage(tokens, source="estimated")
+            return build_context_usage(
+                tokens, threshold=compact_token_threshold, source="estimated"
+            )
 
-    return estimate_context_usage(messages, system)
+    return estimate_context_usage(messages, system, threshold=compact_token_threshold)
 
 
 async def _infer_chat_model(chat_id: str) -> str:
@@ -456,9 +460,6 @@ async def send_message(body: SendMessageRequest, request: Request):
     # Resolve connection for model
     connection, bare_model = await _resolve_connection(body.model_id, request.app.state)
 
-    # Detect regeneration by checking parent message role
-    parent_msg = await ChatMessage.get_by_id(body.parent_id) if body.parent_id else None
-
     from cptr.utils.chat_task import (
         get_pending_input_lock,
         process_pending_chat_inputs,
@@ -469,7 +470,10 @@ async def send_message(body: SendMessageRequest, request: Request):
     user_msg = None
     assistant_msg = None
     async with get_pending_input_lock(chat.id):
-        if body.chat_id and await _chat_has_active_generation(chat.id):
+        # Queue only follow-ups attached to their own unfinished assistant branch.
+        # Other branches in the same chat are independent and can run concurrently.
+        parent_msg = await ChatMessage.get_by_id(body.parent_id) if body.parent_id else None
+        if body.chat_id and _should_queue_for_parent(parent_msg):
             queued_meta = {"queued": True}
             if body.files:
                 queued_meta["files"] = body.files
@@ -832,12 +836,16 @@ async def _chat_has_active_generation(chat_id: str) -> bool:
     return any(m.role == "assistant" and not m.done for m in messages)
 
 
+def _should_queue_for_parent(parent_msg: ChatMessage | None) -> bool:
+    return bool(parent_msg and parent_msg.role == "assistant" and not parent_msg.done)
+
+
 # ── Queue management ───────────────────────────────────────
 
 
 @router.post("/{chat_id}/queue/{message_id}/send")
 async def queue_send_now(chat_id: str, message_id: str, request: Request):
-    """Cancel current generation, dequeue this message, send it immediately."""
+    """Dequeue one message and send it immediately on its stored branch."""
     user_id = _get_user(request)
     chat = await Chat.get_by_id(chat_id)
     if not chat or chat.user_id != user_id:
@@ -849,42 +857,25 @@ async def queue_send_now(chat_id: str, message_id: str, request: Request):
     if not (msg.meta and msg.meta.get("queued")):
         raise HTTPException(400, "message is not queued")
 
-    from cptr.utils.chat_task import (
-        cancel_task,
-        get_pending_input_lock,
-        select_pending_input_parent_id,
-        start_task,
-    )
+    from cptr.utils.chat_task import cancel_task, get_pending_input_lock, start_task
 
     async with get_pending_input_lock(chat_id):
-        # Cancel any active task
         all_msgs = await ChatMessage.get_all_by_chat(chat_id)
-        for m in all_msgs:
-            if m.role == "assistant" and not m.done:
-                await cancel_task(m.id)
-                await ChatMessage.update(m.id, done=True)
-                m.done = True
+        parent_msg = next((m for m in all_msgs if m.id == msg.parent_id), None)
+        if parent_msg and parent_msg.role == "assistant" and not parent_msg.done:
+            await cancel_task(parent_msg.id)
+            await ChatMessage.update(parent_msg.id, done=True)
+            parent_msg.done = True
 
         # Clear queued flag on this message
         meta = dict(msg.meta or {})
         meta.pop("queued", None)
         await ChatMessage.update(message_id, meta=meta or None)
 
-        parent_id = select_pending_input_parent_id(
-            all_msgs,
-            chat.current_message_id,
-            msg.parent_id,
-        )
-
-        # Re-parent the user message to the correct leaf
-        if msg.parent_id != parent_id:
-            await ChatMessage.update(message_id, parent_id=parent_id)
-
         # Resolve connection and start task
-        model_id = msg.model or (all_msgs[-1].model if all_msgs else "")
+        model_id = msg.model or (chat.meta or {}).get("last_model", "")
         if not model_id:
-            # Fall back to last used model from chat meta
-            model_id = (chat.meta or {}).get("last_model", "")
+            model_id = next((m.model for m in reversed(all_msgs) if m.model), "")
         connection, bare_model = await _resolve_connection(model_id, request.app.state)
         workspace = (chat.meta or {}).get("workspace", "")
         meta_for_model = dict(chat.meta or {})

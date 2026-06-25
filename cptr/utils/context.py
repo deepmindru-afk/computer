@@ -35,6 +35,7 @@ def should_compact(
     system_prompt: str,
     last_usage: dict | None = None,
     new_messages_since: int = 0,
+    threshold: int | None = None,
 ) -> bool:
     """True when estimated tokens exceed the compact token threshold.
 
@@ -43,7 +44,7 @@ def should_compact(
     estimates the new messages appended since that call.
     Falls back to full estimation when no usage data exists.
     """
-    threshold = _get_threshold()
+    resolved_threshold = threshold or _get_threshold()
 
     if last_usage and last_usage.get("input_tokens"):
         # Real base from last API call + estimate only new additions
@@ -51,11 +52,11 @@ def should_compact(
         if new_messages_since > 0:
             new_msgs = messages[-new_messages_since:]
             base += estimate_messages_tokens(new_msgs)
-        return base > threshold
+        return base > resolved_threshold
 
     # Full estimation fallback
     total = estimate_tokens(system_prompt) + estimate_messages_tokens(messages)
-    return total > threshold
+    return total > resolved_threshold
 
 
 def build_context_usage(tokens: int, *, threshold: int | None = None, source: str) -> dict:
@@ -71,11 +72,63 @@ def build_context_usage(tokens: int, *, threshold: int | None = None, source: st
     }
 
 
-def estimate_context_usage(messages: list[dict], system_prompt: str) -> dict:
+def estimate_context_usage(
+    messages: list[dict], system_prompt: str, *, threshold: int | None = None
+) -> dict:
     """Return context fullness stats using the same estimate as compaction."""
-    threshold = _get_threshold()
+    resolved_threshold = threshold or _get_threshold()
     estimated_tokens = estimate_tokens(system_prompt) + estimate_messages_tokens(messages)
-    return build_context_usage(estimated_tokens, threshold=threshold, source="estimated")
+    return build_context_usage(estimated_tokens, threshold=resolved_threshold, source="estimated")
+
+
+def _parse_positive_int(value: object) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def resolve_compact_token_threshold(
+    model: str | None = None,
+    *,
+    chat_models_config: dict | None = None,
+    global_cap: int | None = None,
+) -> int:
+    """Return the effective compaction threshold for a model.
+
+    The existing global threshold is the cap. Model-level values can lower it
+    for smaller context windows, but never raise it.
+    """
+    cap = global_cap or _get_threshold()
+    model_threshold = None
+
+    if chat_models_config:
+        candidate_keys = []
+        if model:
+            candidate_keys.append(model)
+            if "/" in model:
+                candidate_keys.append(model.split("/", 1)[1])
+        candidate_keys.append("*")
+
+        for key in candidate_keys:
+            params = chat_models_config.get(key, {}).get("params", {})
+            model_threshold = _parse_positive_int(params.get("compact_token_threshold"))
+            if model_threshold:
+                break
+
+    return min(model_threshold, cap) if model_threshold else cap
+
+
+async def load_compact_token_threshold(model: str | None = None) -> int:
+    """Load the effective compaction threshold from persisted model config."""
+    try:
+        from cptr.models import Config
+
+        chat_models_config = await Config.get("chat.models") or {}
+    except Exception:
+        chat_models_config = {}
+    return resolve_compact_token_threshold(model, chat_models_config=chat_models_config)
 
 
 def _get_threshold() -> int:
