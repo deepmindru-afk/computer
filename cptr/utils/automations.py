@@ -173,10 +173,9 @@ async def execute_automation(automation, webhook_payload: str | None = None) -> 
         chats_dir.mkdir(parents=True, exist_ok=True)
         (chats_dir / f"{chat.id}.json").write_text("{}")
 
-        # Resolve connection for model
-        from cptr.routers.chat import _resolve_connection
+        from cptr.utils.model_targets import resolve_model_target
 
-        connection, bare_model = await _resolve_connection(model_id)
+        target = await resolve_model_target(model_id)
 
         # Start the agentic loop (same as interactive chat)
         from cptr.utils.chat_task import start_task
@@ -185,9 +184,8 @@ async def execute_automation(automation, webhook_payload: str | None = None) -> 
             message_id=assistant_msg.id,
             chat_id=chat.id,
             user_id=automation.user_id,
-            connection=connection,
             workspace=workspace,
-            model=bare_model,
+            target=target,
         )
 
         # Notify frontend (standard chat event so sidebar updates)

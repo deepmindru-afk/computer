@@ -58,6 +58,60 @@ export const updateConfig = (config: Record<string, unknown>) =>
 		method: 'PUT'
 	});
 
+// ── Agents ─────────────────────────────────────────────────
+
+export type AgentType = 'codex' | 'claude_code';
+export type AgentMode = 'auto' | 'enabled' | 'disabled';
+export type AgentStatus = 'ready' | 'not_found' | 'missing_dependency' | 'auth_unknown' | 'error';
+
+export interface AgentProfile {
+	id: string;
+	agent: AgentType;
+	name: string;
+	mode: AgentMode;
+	command: string;
+	home: string | null;
+	models: string[];
+	default_model: string;
+	approval_mode?: 'ask' | 'auto' | 'full';
+	sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+	permission_mode?: 'default' | 'accept_edits' | 'bypass_permissions';
+	launch_args?: string;
+}
+
+export interface AgentsResponseProfile {
+	id: string;
+	agent: AgentType;
+	name: string;
+	config: AgentProfile;
+	detected: {
+		status: AgentStatus;
+		command: string | null;
+		version: string | null;
+		message: string | null;
+		models?: string[] | null;
+	};
+	available: boolean;
+	implicit: boolean;
+	model_ids: string[];
+}
+
+export interface AgentsResponse {
+	profiles: AgentsResponseProfile[];
+}
+
+export const getAgents = async (): Promise<AgentsResponse> =>
+	fetchJSON<AgentsResponse>('/api/admin/agents');
+
+export const updateAgents = (profiles: AgentProfile[]): Promise<AgentsResponse> =>
+	fetchJSON<AgentsResponse>('/api/admin/agents', {
+		...jsonBody({ profiles }),
+		method: 'PUT'
+	});
+
+export const refreshAgents = async (): Promise<AgentsResponse> =>
+	fetchJSON<AgentsResponse>('/api/admin/agents/refresh', { method: 'POST' });
+
 // ── Connections ─────────────────────────────────────────────
 
 export interface Connection {
@@ -118,7 +172,14 @@ export interface ModelConfigEntry {
 
 export interface ModelConfigResponse {
 	config: Record<string, ModelConfigEntry>;
-	models: { id: string; name: string; provider: string; connection_id: string }[];
+	models: {
+		id: string;
+		name: string;
+		provider: string;
+		connection_id: string;
+		agent_id?: string;
+		profile_id?: string;
+	}[];
 }
 
 export const getModelConfig = async (): Promise<ModelConfigResponse> =>

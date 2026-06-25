@@ -2034,14 +2034,19 @@ async def _run_existing_subagent_chat(
     """Run the agent loop for an already-created sub-agent chat."""
     from cptr.models import ChatMessage
     from cptr.utils.chat_task import run_chat_task
+    from cptr.utils.model_targets import ApiModelTarget
 
     await run_chat_task(
         message_id=assistant_msg_id,
         chat_id=chat_id,
         user_id=user_id,
-        connection=connection,
+        target=ApiModelTarget(
+            kind="api",
+            connection=connection,
+            runtime_model=model,
+            full_model_id=model,
+        ),
         workspace=workspace,
-        model=model,
     )
 
     result_msg = await ChatMessage.get_by_id(assistant_msg_id)

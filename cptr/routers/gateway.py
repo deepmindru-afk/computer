@@ -163,14 +163,12 @@ async def create_chat_completion(request: Request, body: ChatCompletionRequest):
     # 1. Resolve model → workspace path
     workspace = await _resolve_workspace(user_id, body.model)
 
-    # 2. Resolve the underlying LLM connection for this workspace
-    connection, bare_model, model_id = await _resolve_model(workspace)
+    # 2. Resolve the selected model target for this workspace.
+    target, model_id = await _resolve_model(workspace, request.app.state)
 
     # Intercept OWUI utility tasks (follow-ups, title gen, tags gen).
     # These should go directly to the LLM, not through the agentic loop.
-    utility_result = await _intercept_task(
-        request, body, connection, bare_model, model_id
-    )
+    utility_result = await _intercept_task(request, body, workspace, model_id)
     if utility_result is not None:
         return utility_result
 
@@ -203,10 +201,9 @@ async def create_chat_completion(request: Request, body: ChatCompletionRequest):
         message_id=assistant_msg.id,
         chat_id=chat_id,
         user_id=user_id,
-        connection=connection,
         workspace=workspace,
-        model=bare_model,
         output_queue=output_queue,
+        target=target,
     )
 
     # 6. Stream SSE response
@@ -467,8 +464,7 @@ _UTILITY_PATTERNS = [
 async def _intercept_task(
     request: Request,
     body: ChatCompletionRequest,
-    connection: dict,
-    bare_model: str,
+    workspace: str,
     model_id: str,
 ) -> dict | None:
     """Detect OWUI utility tasks and proxy them directly to the LLM.
@@ -484,7 +480,10 @@ async def _intercept_task(
     task_header = request.headers.get(OWUI_TASK_HEADER, "").strip()
     if task_header:
         logger.info("[gateway] Detected utility task via header: %s", task_header)
-        return await _proxy_to_llm(body, connection, bare_model)
+        utility_target = await _resolve_utility_model(workspace, request.app.state)
+        return await _proxy_to_llm(
+            body, utility_target.connection, utility_target.runtime_model
+        )
 
     # 2. Message content pattern matching (fallback)
     if not body.messages:
@@ -500,13 +499,16 @@ async def _intercept_task(
         return None
 
     logger.info("[gateway] Detected utility task via content matching")
-    return await _proxy_to_llm(body, connection, bare_model)
+    utility_target = await _resolve_utility_model(workspace, request.app.state)
+    return await _proxy_to_llm(
+        body, utility_target.connection, utility_target.runtime_model
+    )
 
 
 async def _proxy_to_llm(
     body: ChatCompletionRequest,
     connection: dict,
-    bare_model: str,
+    runtime_model: str,
 ) -> dict:
     """Proxy a utility task directly to the underlying LLM."""
     from cptr.utils.ai import chat_completion
@@ -522,7 +524,7 @@ async def _proxy_to_llm(
             provider=provider,
             base_url=base_url,
             api_key=api_key,
-            model=bare_model,
+            model=runtime_model,
             messages=body.messages,
             max_tokens=200,
         )
@@ -582,8 +584,8 @@ async def _resolve_workspace(user_id: str, model_id: str) -> str:
 # ── Model connection resolution ──────────────────────────────
 
 
-async def _resolve_model(workspace: str) -> tuple[dict, str, str]:
-    """Find a model connection to use for the agentic loop.
+async def _resolve_model(workspace: str, app_state=None):
+    """Find a model target to use for the agentic loop.
 
     Priority:
       1. Gateway model selected in Settings > Gateway
@@ -591,15 +593,15 @@ async def _resolve_model(workspace: str) -> tuple[dict, str, str]:
       3. Default model from Settings > Models (chat.default_model)
       4. First enabled connection's first model (with auto-discovery)
 
-    Returns (connection_dict, bare_model, full_model_id).
+    Returns (target, full_model_id).
     """
-    from cptr.routers.chat import _resolve_connection
+    from cptr.utils.model_targets import first_api_model_target, resolve_model_target
 
     gateway_model = await Config.get("gateway.model")
     if isinstance(gateway_model, str) and gateway_model.strip():
         try:
-            connection, bare = await _resolve_connection(gateway_model.strip())
-            return connection, bare, gateway_model.strip()
+            target = await resolve_model_target(gateway_model.strip(), app_state)
+            return target, gateway_model.strip()
         except Exception:
             logger.warning(
                 "[openai-compat] Gateway model '%s' not found, falling back",
@@ -614,8 +616,8 @@ async def _resolve_model(workspace: str) -> tuple[dict, str, str]:
 
     if model_override:
         try:
-            connection, bare = await _resolve_connection(model_override)
-            return connection, bare, model_override
+            target = await resolve_model_target(model_override, app_state)
+            return target, model_override
         except Exception:
             logger.warning(
                 "[openai-compat] Workspace model override '%s' not found, falling back",
@@ -626,32 +628,46 @@ async def _resolve_model(workspace: str) -> tuple[dict, str, str]:
     default_model = await Config.get("chat.default_model")
     if isinstance(default_model, str) and default_model.strip():
         try:
-            connection, bare = await _resolve_connection(default_model.strip())
-            return connection, bare, default_model.strip()
+            target = await resolve_model_target(default_model.strip(), app_state)
+            return target, default_model.strip()
         except Exception:
             logger.warning(
                 "[openai-compat] Default model '%s' not found, falling back",
                 default_model,
             )
 
-    # Fall back to the first enabled connection + its first model
-    from cptr.routers.chat import _fetch_provider_models
+    target = await first_api_model_target(app_state)
+    return target, target.full_model_id
 
-    connections = await Config.get("chat.connections") or []
-    for conn in connections:
-        if not conn.get("enabled", True):
-            continue
-        model_ids = conn.get("data", {}).get("models")
-        if not model_ids:
-            # Attempt auto-discovery if models aren't pre-stored
-            model_ids = await _fetch_provider_models(conn)
-        if model_ids:
-            prefix = (conn.get("prefix_id") or "").strip()
-            bare = model_ids[0]
-            full = f"{prefix}/{bare}" if prefix else bare
-            return conn, bare, full
 
-    raise HTTPException(503, "No model connections configured. Add a connection in cptr settings.")
+async def _resolve_utility_model(workspace: str, app_state=None):
+    """Resolve an API model for gateway utility tasks."""
+    from cptr.utils.model_targets import ApiModelTarget, first_api_model_target, resolve_model_target
+
+    candidates: list[str] = []
+    gateway_model = await Config.get("gateway.model")
+    if isinstance(gateway_model, str) and gateway_model.strip():
+        candidates.append(gateway_model.strip())
+
+    model_file = Path(workspace) / ".cptr" / "model"
+    if model_file.is_file():
+        override = model_file.read_text().strip()
+        if override:
+            candidates.append(override)
+
+    default_model = await Config.get("chat.default_model")
+    if isinstance(default_model, str) and default_model.strip():
+        candidates.append(default_model.strip())
+
+    for model_id in candidates:
+        try:
+            target = await resolve_model_target(model_id, app_state)
+            if isinstance(target, ApiModelTarget):
+                return target
+        except Exception:
+            logger.warning("[openai-compat] Utility model '%s' not available", model_id)
+
+    return await first_api_model_target(app_state)
 
 
 # ── Session mapping ──────────────────────────────────────────

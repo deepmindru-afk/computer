@@ -690,8 +690,7 @@ class BotManager:
     async def _dispatch_task(
         self, chat_id: str, event: MessageEvent, bot: dict, adapter: BaseAdapter | None,
     ) -> None:
-        from cptr.models import Chat, ChatMessage, Config
-        from cptr.routers.chat import _resolve_connection
+        from cptr.models import Chat, ChatMessage
         from cptr.utils.chat_task import start_task, _task_chat
         from cptr.utils.config import now_ms
 
@@ -727,9 +726,11 @@ class BotManager:
             parent_id=parent_id, meta=user_meta, created_at=now_ms(),
         )
 
-        # Resolve model connection
+        # Resolve model target
         try:
-            connection, bare_model = await _resolve_connection(bot["model_id"])
+            from cptr.utils.model_targets import resolve_model_target
+
+            target = await resolve_model_target(bot["model_id"])
         except Exception:
             logger.exception("[bridge] Failed to resolve model %s", bot["model_id"])
             if adapter:
@@ -770,9 +771,8 @@ class BotManager:
             message_id=assistant_msg.id,
             chat_id=chat_id,
             user_id=bot["user_id"],
-            connection=connection,
             workspace=bot["workspace"],
-            model=bare_model,
+            target=target,
         )
         logger.info("[bridge] Started task for bot %s, chat %s", bot["id"][:8], chat_id[:8])
 
@@ -1024,5 +1024,3 @@ def _tool_label(name: str, args: dict) -> str:
             return query[:40] if query else name
 
     return name
-
-

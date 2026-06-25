@@ -172,6 +172,10 @@ async def get_models(request: Request):
                 }
             )
 
+    from cptr.utils.agents.detection import get_available_agent_model_entries
+
+    models.extend(await get_available_agent_model_entries(request.app.state))
+
     default_model = await Config.get("chat.default_model")
 
     # Filter out inactive models
@@ -457,8 +461,10 @@ async def send_message(body: SendMessageRequest, request: Request):
         # Auto-add .cptr to .gitignore if this is a git repo
         await asyncio.to_thread(ensure_cptr_gitignored, body.workspace)
 
-    # Resolve connection for model
-    connection, bare_model = await _resolve_connection(body.model_id, request.app.state)
+    # Resolve selected model to either an API connection or an agent profile.
+    from cptr.utils.model_targets import resolve_model_target
+
+    target = await resolve_model_target(body.model_id, request.app.state)
 
     from cptr.utils.chat_task import (
         get_pending_input_lock,
@@ -532,10 +538,9 @@ async def send_message(body: SendMessageRequest, request: Request):
         message_id=assistant_msg.id,
         chat_id=chat.id,
         user_id=user_id,
-        connection=connection,
         workspace=body.workspace,
-        model=bare_model,
         regeneration_prompt=body.regeneration_prompt,
+        target=target,
     )
 
     # Return the created messages so the frontend can append them
@@ -571,7 +576,11 @@ async def compact_chat(chat_id: str, body: CompactRequest, request: Request):
         usage = await _get_chat_context_usage(chat, body.model_id)
         return {"ok": True, "compacted": False, "reason": "too_short", "context_usage": usage}
 
-    connection, bare_model = await _resolve_connection(body.model_id, request.app.state)
+    from cptr.utils.model_targets import ApiModelTarget, first_api_model_target, resolve_model_target
+
+    target = await resolve_model_target(body.model_id, request.app.state)
+    if not isinstance(target, ApiModelTarget):
+        target = await first_api_model_target(request.app.state)
 
     from cptr.utils.chat_task import _load_message_history
     from cptr.utils.summarize import summarize_messages
@@ -581,6 +590,8 @@ async def compact_chat(chat_id: str, body: CompactRequest, request: Request):
         usage = await _get_chat_context_usage(chat, body.model_id)
         return {"ok": True, "compacted": False, "reason": "too_short", "context_usage": usage}
 
+    connection = target.connection
+    runtime_model = target.runtime_model
     provider = connection["provider"]
     api_key = decrypt_key(connection.get("api_key", ""), _get_jwt_secret())
     from cptr.utils.chat_task import _default_base_url
@@ -594,7 +605,7 @@ async def compact_chat(chat_id: str, body: CompactRequest, request: Request):
         provider,
         base_url,
         api_key,
-        bare_model,
+        runtime_model,
         api_type=api_type,
     )
     await ChatMessage.update(message_id, chat_summary=summary)
@@ -692,8 +703,10 @@ async def approve_tool(chat_id: str, message_id: str, body: ApproveRequest, requ
 
         await ChatMessage.update(message_id, output=output, done=False)
 
-        # Resolve connection and continue
-        connection, bare_model = await _resolve_connection(model_id, request.app.state)
+        # Resolve model target and continue
+        from cptr.utils.model_targets import resolve_model_target
+
+        target = await resolve_model_target(model_id, request.app.state)
         workspace = chat.meta.get("workspace", "") if chat.meta else ""
 
         from cptr.utils.chat_task import start_task
@@ -702,9 +715,8 @@ async def approve_tool(chat_id: str, message_id: str, body: ApproveRequest, requ
             message_id=message_id,
             chat_id=chat_id,
             user_id=user_id,
-            connection=connection,
             workspace=workspace,
-            model=bare_model,
+            target=target,
         )
     else:
         call["status"] = "rejected"
@@ -872,11 +884,13 @@ async def queue_send_now(chat_id: str, message_id: str, request: Request):
         meta.pop("queued", None)
         await ChatMessage.update(message_id, meta=meta or None)
 
-        # Resolve connection and start task
+        # Resolve model target and start task
         model_id = msg.model or (chat.meta or {}).get("last_model", "")
         if not model_id:
             model_id = next((m.model for m in reversed(all_msgs) if m.model), "")
-        connection, bare_model = await _resolve_connection(model_id, request.app.state)
+        from cptr.utils.model_targets import resolve_model_target
+
+        target = await resolve_model_target(model_id, request.app.state)
         workspace = (chat.meta or {}).get("workspace", "")
         meta_for_model = dict(chat.meta or {})
         if meta_for_model.get("last_model") != model_id:
@@ -898,9 +912,8 @@ async def queue_send_now(chat_id: str, message_id: str, request: Request):
         message_id=assistant_msg.id,
         chat_id=chat_id,
         user_id=user_id,
-        connection=connection,
         workspace=workspace,
-        model=bare_model,
+        target=target,
     )
     return {"ok": True, "chat_id": chat_id, "message_id": assistant_msg.id}
 
@@ -925,7 +938,7 @@ async def queue_delete(chat_id: str, message_id: str, request: Request):
 
 async def _resolve_connection(model_id: str, app_state=None) -> tuple[dict, str]:
     """Find connection for model.
-    'openrouter/gpt-4o' → connection with prefix_id='openrouter', bare model='gpt-4o'
+    'openrouter/gpt-4o' → connection with prefix_id='openrouter', runtime model='gpt-4o'
     'claude-sonnet-4-20250514' → scan all connections for match
     Raises 400 if not found.
     """
@@ -935,10 +948,10 @@ async def _resolve_connection(model_id: str, app_state=None) -> tuple[dict, str]
 
     # Try prefix match first
     if "/" in model_id:
-        prefix, bare = model_id.split("/", 1)
+        prefix, runtime_model = model_id.split("/", 1)
         for conn in connections:
             if (conn.get("prefix_id") or "").strip() == prefix:
-                return conn, bare
+                return conn, runtime_model
 
     # Scan all connections using cache
     for conn in connections:

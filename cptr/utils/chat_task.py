@@ -30,6 +30,13 @@ from cptr.utils.tools import ALL_TOOLS, execute_tool, get_tool_list, _fn_to_sche
 from cptr.utils.chat_export import export_chat_to_file
 from cptr.utils.json_parser import extract_json
 from cptr.utils.prompt_templates import load_system_prompt as _load_system_prompt
+from cptr.utils.agents.events import (
+    AgentDone,
+    AgentError,
+    AgentReasoningDelta,
+    AgentTextDelta,
+)
+from cptr.utils.model_targets import AgentModelTarget, ApiModelTarget, ModelTarget
 
 logger = logging.getLogger(__name__)
 
@@ -55,21 +62,30 @@ def start_task(
     message_id: str,
     chat_id: str,
     user_id: str,
-    connection: dict,
     workspace: str,
-    model: str,
+    model: str = "",
+    connection: dict | None = None,
     regeneration_prompt: str | None = None,
     output_queue: asyncio.Queue | None = None,
+    target: ModelTarget | None = None,
 ):
     """Launch the agentic loop as a background asyncio.Task."""
+    if target is None:
+        if connection is None:
+            raise ValueError("start_task requires either target or connection")
+        target = ApiModelTarget(
+            kind="api",
+            connection=connection,
+            runtime_model=model,
+            full_model_id=model,
+        )
     task = asyncio.create_task(
         run_chat_task(
             message_id,
             chat_id,
             user_id,
-            connection,
+            target,
             workspace,
-            model,
             regeneration_prompt,
             output_queue,
         )
@@ -270,13 +286,13 @@ async def process_pending_chat_inputs(chat_id: str, user_id: str, workspace: str
                 )
                 return
 
-            # Resolve connection
+            # Resolve model target
             try:
-                from cptr.routers.chat import _resolve_connection
+                from cptr.utils.model_targets import resolve_model_target
 
-                connection, bare_model = await _resolve_connection(model_id)
+                target = await resolve_model_target(model_id)
             except Exception:
-                logger.exception("[chat-input] Failed to resolve connection for model %s", model_id)
+                logger.exception("[chat-input] Failed to resolve model target for %s", model_id)
                 return
 
             # Create assistant placeholder
@@ -306,9 +322,8 @@ async def process_pending_chat_inputs(chat_id: str, user_id: str, workspace: str
                 message_id=assistant_msg.id,
                 chat_id=chat_id,
                 user_id=user_id,
-                connection=connection,
                 workspace=workspace,
-                model=bare_model,
+                target=target,
             )
             logger.info(
                 "[chat-input] Processed %d pending input message(s) for chat %s",
@@ -1060,9 +1075,8 @@ async def run_chat_task(
     message_id: str,
     chat_id: str,
     user_id: str,
-    connection: dict,
+    target: ModelTarget,
     workspace: str,
-    model: str,
     regeneration_prompt: str | None = None,
     output_queue: asyncio.Queue | None = None,
 ):
@@ -1171,7 +1185,128 @@ async def run_chat_task(
         log("[task %s] db save (%s) result: updated=%s", message_id[:8], save_reason, saved)
         return saved
 
+    async def save_session(agent_target: AgentModelTarget, resume_state: dict | None):
+        if not resume_state:
+            return
+        chat = await Chat.get_by_id(chat_id)
+        if not chat:
+            return
+        meta = dict(chat.meta or {})
+        sessions = dict(meta.get("agent_sessions") or {})
+        sessions[agent_target.profile_id] = {
+            **resume_state,
+            "profile_id": agent_target.profile_id,
+            "agent": agent_target.agent,
+            "model": agent_target.model,
+            "workspace": workspace,
+            "updated_at": now_ms(),
+        }
+        meta["agent_sessions"] = sessions
+        await Chat.update_meta(chat_id, meta, now_ms())
+
+    async def _run_agent_target(agent_target: AgentModelTarget):
+        nonlocal content, text_buffer
+        from cptr.utils.agents.claude_code import run_claude_code_agent
+        from cptr.utils.agents.codex import run_codex_agent
+
+        chat_obj = await Chat.get_by_id(chat_id)
+        chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
+        messages, loaded_summary = await _load_message_history(chat_id, message_id)
+        memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
+        system = await _load_system_prompt(
+            workspace,
+            agent_target.full_model_id,
+            user_id=user_id,
+            current_message=memory_message,
+            recent_messages=messages,
+            mentioned_files=memory_files,
+        )
+        if loaded_summary:
+            system += f"\n\n[CONVERSATION SUMMARY]\n{loaded_summary}"
+        if regeneration_prompt:
+            messages.append({"role": "user", "content": regeneration_prompt})
+        if chat_params.get("plan_mode", False):
+            messages.append({"role": "user", "content": PLAN_MODE_PROMPT})
+        system = await _apply_voice_mode_system_prompt(system, chat_params)
+
+        resume_state = None
+        if chat_obj:
+            sessions = (chat_obj.meta or {}).get("agent_sessions") or {}
+            if isinstance(sessions, dict):
+                candidate = sessions.get(agent_target.profile_id)
+                if isinstance(candidate, dict):
+                    resume_state = candidate
+
+        runner = run_codex_agent if agent_target.agent == "codex" else run_claude_code_agent
+        reasoning_buffer = ""
+        async for event in runner(
+            profile=agent_target.config,
+            model=agent_target.model,
+            workspace=workspace,
+            messages=messages,
+            system_prompt=system,
+            chat_params=chat_params,
+            resume_state=resume_state,
+        ):
+            if isinstance(event, AgentTextDelta):
+                content += event.text
+                text_buffer += event.text
+                await emit(delta=event.text)
+                _sync_state()
+            elif isinstance(event, AgentReasoningDelta):
+                reasoning_buffer += event.text
+                item = {
+                    "type": "reasoning",
+                    "id": f"reasoning-{message_id}",
+                    "status": "in_progress",
+                    "content": [{"type": "reasoning_text", "text": reasoning_buffer}],
+                }
+                _upsert_output_item(output_items, item)
+                await emit(output=item)
+                _sync_state()
+            elif isinstance(event, AgentError):
+                raise RuntimeError(event.message)
+            elif isinstance(event, AgentDone):
+                if reasoning_buffer:
+                    _upsert_output_item(
+                        output_items,
+                        {
+                            "type": "reasoning",
+                            "id": f"reasoning-{message_id}",
+                            "status": "completed",
+                            "content": [{"type": "reasoning_text", "text": reasoning_buffer}],
+                        },
+                    )
+                flushed_item = _flush_text()
+                if flushed_item:
+                    await emit(output=flushed_item)
+                await save_session(agent_target, event.resume_state)
+                await _save_message(
+                    "agent done",
+                    content=content,
+                    output=output_items,
+                    usage=event.usage,
+                    done=True,
+                )
+                _task_state.pop(message_id, None)
+                await _emit_done()
+                return
+
+        flushed_item = _flush_text()
+        if flushed_item:
+            await emit(output=flushed_item)
+        await _save_message("agent stream ended", content=content, output=output_items, done=True)
+        _task_state.pop(message_id, None)
+        await _emit_done()
+        return
+
     try:
+        if isinstance(target, AgentModelTarget):
+            await _run_agent_target(target)
+            return
+
+        connection = target.connection
+        model = target.runtime_model
         provider = connection["provider"]
         api_key = decrypt_key(connection.get("api_key", ""), _get_jwt_secret())
         base_url = connection.get("base_url") or _default_base_url(provider)

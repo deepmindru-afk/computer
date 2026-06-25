@@ -11,6 +11,8 @@ from cptr.routers.chat import invalidate_model_cache
 from cptr.models import User, Auth, Config
 from cptr.utils.config import AuthResult, _get_jwt_secret, check_access, hash_password, now_ms
 from cptr.utils.crypto import decrypt_key, encrypt_key, mask_key
+from cptr.utils.agents.detection import get_agent_status, invalidate_agent_detection_cache
+from cptr.utils.agents.models import save_agent_profiles
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -152,6 +154,39 @@ async def put_config(body: ConfigUpdateRequest, request: Request):
     require_admin(request)
     await Config.upsert(_prepare_config_updates(body.config))
     return {"ok": True}
+
+
+# ── Agents ──────────────────────────────────────────────────
+
+
+class AgentsUpdateRequest(BaseModel):
+    profiles: list[dict]
+
+
+@router.get("/agents")
+async def get_agents(request: Request):
+    """Get configured agent profiles plus live detection status."""
+    require_admin(request)
+    return await get_agent_status(request.app.state)
+
+
+@router.put("/agents")
+async def update_agents(body: AgentsUpdateRequest, request: Request):
+    """Replace configured agent profiles."""
+    require_admin(request)
+    await save_agent_profiles(body.profiles)
+    invalidate_agent_detection_cache(request.app.state)
+    invalidate_model_cache(request.app.state)
+    return await get_agent_status(request.app.state, refresh=True)
+
+
+@router.post("/agents/refresh")
+async def refresh_agents(request: Request):
+    """Refresh agent detection status."""
+    require_admin(request)
+    invalidate_agent_detection_cache(request.app.state)
+    invalidate_model_cache(request.app.state)
+    return await get_agent_status(request.app.state, refresh=True)
 
 
 # ── Connections ──────────────────────────────────────────────
@@ -407,6 +442,10 @@ async def _build_model_config(request: Request):
                     "connection_id": conn["id"],
                 }
             )
+
+    from cptr.utils.agents.detection import get_available_agent_model_entries
+
+    models.extend(await get_available_agent_model_entries(request.app.state))
 
     return {"config": config, "models": models}
 

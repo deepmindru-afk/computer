@@ -10,6 +10,7 @@
 	import About from './Settings/About.svelte';
 	import Users from './Admin/Users.svelte';
 	import Connections from './Admin/Connections.svelte';
+	import Agents from './Admin/Agents.svelte';
 	import Models from './Admin/Models.svelte';
 	import Messaging from './Admin/Messaging.svelte';
 	import Gateway from './Admin/Gateway.svelte';
@@ -30,6 +31,7 @@
 		| 'about'
 		| 'users'
 		| 'connections'
+		| 'agents'
 		| 'models'
 		| 'messaging'
 		| 'gateway'
@@ -56,6 +58,7 @@
 	const adminTabIds: Tab[] = [
 		'users',
 		'connections',
+		'agents',
 		'models',
 		'messaging',
 		'gateway',
@@ -81,6 +84,7 @@
 	const adminTabs: { id: Tab; label: string; icon: string }[] = $derived([
 		{ id: 'users', label: $t('admin.users'), icon: 'user' },
 		{ id: 'connections', label: $t('admin.connections'), icon: 'plug' },
+		{ id: 'agents', label: $t('admin.agents'), icon: 'terminal' },
 		{ id: 'models', label: $t('admin.models'), icon: 'cube' },
 		{ id: 'messaging', label: $t('admin.messaging'), icon: 'chat-bubble' },
 		{ id: 'gateway', label: $t('admin.gateway.tab'), icon: 'gateway' },
@@ -168,11 +172,11 @@
 	</nav>
 
 	<div class="flex-1 overflow-y-auto min-h-0 p-4 md:px-5">
-			{#if activeTab === 'general'}
-				<General />
-			{:else if activeTab === 'memory'}
-				<Memory />
-			{:else if activeTab === 'pwa' && showPwaSettings}
+		{#if activeTab === 'general'}
+			<General />
+		{:else if activeTab === 'memory'}
+			<Memory />
+		{:else if activeTab === 'pwa' && showPwaSettings}
 			<PWA />
 		{:else if activeTab === 'keyboard'}
 			<Keyboard />
@@ -184,6 +188,8 @@
 			<Users />
 		{:else if activeTab === 'connections'}
 			<Connections />
+		{:else if activeTab === 'agents'}
+			<Agents />
 		{:else if activeTab === 'models'}
 			<Models />
 		{:else if activeTab === 'messaging'}
