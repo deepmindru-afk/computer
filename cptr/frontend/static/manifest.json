@@ -2,7 +2,7 @@
 	"id": "/",
 	"name": "cptr",
 	"short_name": "cptr",
-	"description": "Your computer, from anywhere.",
+	"description": "Портал. Ваш компьютер. Всегда. Везде.",
 	"start_url": "/",
 	"scope": "/",
 	"display": "standalone",
