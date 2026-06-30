@@ -33,7 +33,11 @@
 
 	const providerConfig = {
 		openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', placeholder: 'sk-...' },
-		anthropic: { name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', placeholder: 'sk-ant-...' }
+		anthropic: {
+			name: 'Anthropic',
+			baseUrl: 'https://api.anthropic.com/v1',
+			placeholder: 'sk-ant-...'
+		}
 	};
 
 	const config = $derived(providerConfig[provider]);
@@ -66,7 +70,7 @@
 			aiConnected = true;
 			next();
 		} catch (e) {
-			toast.error(e instanceof ApiError ? e.message : 'Connection failed');
+			toast.error(e instanceof ApiError ? e.message : $t('auth.connectionFailed'));
 		} finally {
 			connecting = false;
 		}
@@ -151,7 +155,12 @@
 		{:else if step === 2}
 			<!-- Connect AI -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="animate-in" onkeydown={(e) => { if (e.key === 'Enter' && apiKey.trim()) connectAi(); }}>
+			<div
+				class="animate-in"
+				onkeydown={(e) => {
+					if (e.key === 'Enter' && apiKey.trim()) connectAi();
+				}}
+			>
 				<h2 class="text-xs text-gray-400 dark:text-gray-600 mb-1">
 					{$t('onboarding.connectAi')}
 				</h2>
@@ -161,17 +170,19 @@
 
 				{#if aiConnected}
 					<p class="text-[13px] text-gray-700 dark:text-gray-300 mb-4">
-						{config.name} connected
+						{$t('onboarding.connected', { name: config.name })}
 					</p>
 					<button
 						class="text-[13px] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100"
 						onclick={next}
 					>
-						{$t('tour.next')}
+						{$t('onboarding.next')}
 					</button>
 				{:else}
 					<div class="mb-3">
-						<p class="text-[11px] text-gray-400 dark:text-gray-600 mb-0.5">Provider</p>
+						<p class="text-[11px] text-gray-400 dark:text-gray-600 mb-0.5">
+							{$t('onboarding.provider')}
+						</p>
 						<select
 							bind:value={provider}
 							class="bg-transparent text-[13px] text-gray-700 dark:text-gray-300 outline-none py-0.5 border-none cursor-pointer"
@@ -183,7 +194,9 @@
 
 					{#if provider === 'openai'}
 						<div class="mb-3">
-							<p class="text-[11px] text-gray-400 dark:text-gray-600 mb-0.5">API Type</p>
+							<p class="text-[11px] text-gray-400 dark:text-gray-600 mb-0.5">
+								{$t('onboarding.apiType')}
+							</p>
 							<select
 								bind:value={apiType}
 								class="bg-transparent text-[13px] text-gray-700 dark:text-gray-300 outline-none py-0.5 border-none cursor-pointer"
@@ -195,7 +208,9 @@
 					{/if}
 
 					<div class="mb-3">
-						<p class="text-[11px] text-gray-400 dark:text-gray-600 mb-0.5">{$t('connections.baseUrl')}</p>
+						<p class="text-[11px] text-gray-400 dark:text-gray-600 mb-0.5">
+							{$t('connections.baseUrl')}
+						</p>
 						<input
 							type="text"
 							placeholder="https://api.openai.com/v1"
@@ -214,7 +229,9 @@
 					</div>
 
 					<div class="mb-2">
-						<p class="text-[11px] text-gray-400 dark:text-gray-600 mb-0.5">{$t('connections.apiKey')}</p>
+						<p class="text-[11px] text-gray-400 dark:text-gray-600 mb-0.5">
+							{$t('connections.apiKey')}
+						</p>
 						<input
 							type="password"
 							placeholder={config.placeholder}

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-06-30
+
+### Fixed
+
+- 🔌 **Better compatibility with MCP tools.** Some MCP servers define tools with extra schema details that were previously dropped, which could cause those tools to break. Tool definitions are now preserved in full so they work as expected.
+- 🌍 **More complete translations.** Filled missing labels across all supported languages so newer settings, onboarding, chat, and tool-server UI no longer fall back to English.
+
 ## [0.7.2] - 2026-06-29
 
 ### Changed

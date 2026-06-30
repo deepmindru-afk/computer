@@ -1,6 +1,5 @@
 {
 	"app.tagline": "Your computer, from anywhere.",
-
 	"auth.createAccountHint": "Create your account to get started.",
 	"auth.signInSystemHint": "Sign in with your system account.",
 	"auth.setup": "Setup",
@@ -20,7 +19,6 @@
 	"auth.minChars": "Minimum 6 characters",
 	"auth.connectionFailed": "Connection failed",
 	"auth.accountPending": "Account created. Waiting for admin approval.",
-
 	"sidebar.workspaces": "Workspaces",
 	"sidebar.addWorkspace": "Add workspace",
 	"sidebar.collapse": "Collapse",
@@ -32,14 +30,12 @@
 	"sidebar.workspaceOptions": "Workspace options",
 	"sidebar.closeSidebar": "Close sidebar",
 	"sidebar.showMore": "Show more",
-
 	"bar.newFile": "New File",
 	"bar.newTerminal": "New Terminal",
 	"bar.closeTab": "Close tab",
 	"bar.new": "New...",
 	"bar.sidebar": "Sidebar",
 	"bar.toggleSidebar": "Toggle sidebar",
-
 	"files.filter": "Filter...",
 	"files.refresh": "Refresh",
 	"files.sort": "Sort",
@@ -77,10 +73,8 @@
 	"files.openFolder": "Open folder",
 	"files.expand": "Expand",
 	"files.collapse": "Collapse",
-
 	"quickOpen.searchFiles": "Search files...",
 	"quickOpen.noFiles": "No files found",
-
 	"search.placeholder": "Search...",
 	"search.search": "Search",
 	"search.chats": "Chats",
@@ -88,7 +82,6 @@
 	"search.noResults": "No results found",
 	"search.recentChats": "Recent chats",
 	"search.noRecentChats": "No recent chats",
-
 	"settings.back": "Back",
 	"settings.general": "General",
 	"pwa.settingsTitle": "Progressive Web App",
@@ -120,18 +113,15 @@
 	"settings.save": "Save",
 	"settings.saved": "Saved",
 	"settings.saving": "Saving…",
-
 	"general.title": "General",
 	"general.theme": "Theme",
 	"general.light": "Light",
 	"general.dark": "Dark",
 	"general.system": "System",
 	"general.language": "Language",
-
 	"general.tools": "Tools",
 	"general.autoApproveTools": "Auto-approve all tool calls",
 	"general.autoApproveToolsDesc": "Automatically allow tool calls (write, run, etc.) without confirmation",
-
 	"account.title": "Account",
 	"account.displayName": "Display Name",
 	"account.displayNamePlaceholder": "Enter a display name",
@@ -149,11 +139,9 @@
 	"account.uploadFailed": "Upload failed",
 	"account.failedToUpdate": "Failed to update",
 	"account.failedToRemoveAvatar": "Failed to remove avatar",
-
 	"about.title": "About",
 	"about.license": "License",
 	"about.createdBy": "Created by Tim Baek, made on Earth",
-
 	"git.changes": "Changes",
 	"git.history": "History",
 	"git.fetch": "Fetch",
@@ -202,7 +190,6 @@
 	"git.copyCommitHash": "Copy commit hash",
 	"git.copyFilePath": "Copy File Path",
 	"git.copyRelativePath": "Copy Relative File Path",
-
 	"admin.users": "Users",
 	"admin.settings": "Settings",
 	"admin.noUsers": "No users",
@@ -233,7 +220,6 @@
 	"admin.delete": "Delete",
 	"admin.usernameRequired": "Username required",
 	"admin.minCharsPassword": "Min 6 characters",
-
 	"admin.connections": "Connections",
 	"admin.agents": "Agents",
 	"admin.agentsRefresh": "Refresh",
@@ -256,7 +242,6 @@
 	"admin.agentsStatusMissingDependency": "Missing dependency",
 	"admin.agentsStatusAuthUnknown": "Auth unknown",
 	"admin.agentsStatusError": "Error",
-
 	"connections.loadError": "Failed to load connections",
 	"connections.fieldsRequired": "Base URL and API key required",
 	"connections.added": "Connection added",
@@ -277,15 +262,12 @@
 	"connections.edit": "Edit Connection",
 	"connections.updated": "Connection updated",
 	"connections.verify": "Verify",
-
 	"bar.newChat": "New Chat",
-
 	"home.start": "Start",
 	"home.openFolder": "Open Folder...",
 	"home.recent": "Recent",
 	"home.folders": "Suggested",
 	"home.chatComingSoon": "Chat (coming soon)",
-
 	"directory.cancel": "Cancel",
 	"directory.open": "Open \"{{name}}\"",
 	"directory.hidden": "Hidden",
@@ -293,24 +275,20 @@
 	"directory.goBack": "Go back",
 	"directory.typePath": "Type a path... (Tab to complete)",
 	"directory.retry": "Retry",
-
 	"saveDialog.fileNamePlaceholder": "File name…",
 	"saveDialog.emptyFolder": "Empty folder",
 	"saveDialog.cancel": "Cancel",
 	"saveDialog.save": "Save",
 	"saveDialog.hidden": "Hidden",
 	"saveDialog.retry": "Retry",
-
 	"port.preview": "Preview",
 	"port.via": "via {{name}}",
-
 	"system.title": "System",
 	"system.cpu": "CPU",
 	"system.memory": "Memory",
 	"system.disk": "Disk",
 	"system.cores": "{{count}} cores",
 	"system.process": "PROCESS",
-
 	"admin.web": "Web",
 	"admin.webSearch": "Search",
 	"admin.webEnabled": "Enable web access",
@@ -338,7 +316,6 @@
 	"admin.webCcKey": "API Key",
 	"admin.webCcModel": "Model",
 	"admin.webCcHint": "Use any OpenAI-compatible endpoint (e.g. Perplexity Sonar, LiteLLM proxy)",
-
 	"admin.browser": "Browser",
 	"admin.browserTools": "Browser tools",
 	"admin.browserHint": "Give the AI access to a web browser for navigating pages, clicking elements, and taking screenshots.",
@@ -358,7 +335,6 @@
 	"admin.browserApiKey": "API Key",
 	"admin.browserBaseUrl": "Base URL",
 	"admin.browserFirecrawlBaseUrlHint": "Change for self-hosted Firecrawl instances",
-
 	"admin.models": "Models",
 	"models.defaultModel": "Default model",
 	"models.defaultModelNone": "None (use first available)",
@@ -378,17 +354,14 @@
 	"models.savedParams": "Saved params for {{name}}",
 	"models.add": "+ Add",
 	"models.save": "Save",
-
 	"models.systemPrompt": "System Prompt",
 	"models.systemPromptHint": "Default instructions sent to the model. Use {{VARIABLES}} for dynamic content.",
 	"models.systemPromptInherited": "Inherits global default",
 	"models.templateVariables": "Variables",
 	"models.resetToDefault": "Reset",
-
 	"update.available": "A new version (v{{version}}) is available.",
 	"update.viewRelease": "View release notes →",
 	"update.updateAvailable": "Update available: v{{version}}",
-
 	"general.notifications": "Notifications",
 	"general.browserNotifications": "Browser notifications",
 	"general.browserNotificationsDesc": "Show OS-level notifications when a task completes and the tab is not focused.",
@@ -406,9 +379,7 @@
 	"general.interrupt": "Interrupt",
 	"general.queueDesc": "Messages sent during generation are queued and sent after completion.",
 	"general.interruptDesc": "Sending a message cancels the current generation.",
-
 	"settings.keyboard": "Keyboard",
-
 	"keyboard.title": "Keyboard Shortcuts",
 	"keyboard.resetDefaults": "Reset defaults",
 	"keyboard.command": "Command",
@@ -426,26 +397,22 @@
 	"keyboard.openSettings": "Open the settings panel",
 	"keyboard.toggleSplit": "Toggle split editor view",
 	"keyboard.toggleSidebar": "Show or hide the sidebar",
-
 	"changelog.whatsNew": "What's New",
 	"changelog.releaseNotes": "Release Notes",
 	"changelog.loadError": "Couldn't load release notes.",
 	"changelog.retry": "Retry",
 	"changelog.loading": "Loading release notes...",
 	"changelog.done": "Done",
-
 	"modelSelector.noModels": "No models available",
 	"modelSelector.selectModel": "Select model",
 	"modelSelector.noMatches": "No matches",
 	"modelSelector.search": "Search...",
-
 	"about.licenseName": "Open Use License",
 	"about.copyright": "Copyright © 2026 Open WebUI Inc. All rights reserved.",
 	"about.updateAvailable": "v{{version}} available",
 	"about.share": "Share",
 	"about.copyLink": "Copy link",
 	"about.copied": "Copied!",
-
 	"automations.title": "Automations",
 	"automations.filter": "Filter...",
 	"automations.noMatches": "No matches",
@@ -485,7 +452,6 @@
 	"automations.runNow": "Run now",
 	"automations.newAutomation": "New automation",
 	"automations.toggleSidebar": "Toggle sidebar",
-
 	"automationModal.titlePlaceholder": "Automation title",
 	"automationModal.instructions": "Instructions",
 	"automationModal.promptPlaceholder": "Enter prompt here...",
@@ -495,9 +461,7 @@
 	"automationModal.save": "Save",
 	"automationModal.createBtn": "Create",
 	"automationModal.failedToSave": "Failed to save automation",
-
 	"connections.failedToUpdate": "Failed to update connection",
-
 	"admin.gateway.tab": "Gateway",
 	"admin.gateway.title": "API Gateway",
 	"admin.gateway.description": "Generate API keys to connect Open WebUI or any OpenAI-compatible client to your workspaces.",
@@ -517,9 +481,7 @@
 	"admin.gateway.newKey": "New API key created. Copy it now",
 	"admin.gateway.keyWarning": "This key will only be shown once. Store it securely.",
 	"admin.gateway.howToConnect": "Connect from Open WebUI",
-
 	"admin.messaging": "Messaging",
-
 	"messaging.loadError": "Failed to load bots",
 	"messaging.fillRequired": "All fields are required",
 	"messaging.created": "Bot created",
@@ -541,7 +503,6 @@
 	"messaging.workspacePlaceholder": "Workspace path (e.g. /Users/you/project)",
 	"messaging.modelPlaceholder": "Model ID (e.g. openrouter/claude-sonnet-4-20250514)",
 	"messaging.sendersPlaceholder": "Allowed user IDs (comma-separated, leave empty for all)",
-
 	"common.cancel": "Cancel",
 	"common.save": "Save",
 	"common.edit": "Edit",
@@ -551,7 +512,6 @@
 	"common.dismiss": "Dismiss",
 	"common.loading": "Loading",
 	"common.downloadCsv": "Download CSV",
-
 	"chat.tool.readFile": "Read {{path}}",
 	"chat.tool.readFileRange": "Read {{path}} L{{range}}",
 	"chat.tool.editFile": "Edit {{path}}",
@@ -614,7 +574,6 @@
 	"chat.copyMessage": "Copy message",
 	"chat.editMessagePlaceholder": "Message text...",
 	"chat.editReasoningPlaceholder": "Reasoning text...",
-
 	"plusMenu.askApproval": "Ask for approval",
 	"plusMenu.askApprovalDesc": "Confirm each tool call before it runs",
 	"plusMenu.autoApprove": "Auto-approve",
@@ -631,7 +590,6 @@
 	"plusMenu.paramValue": "value",
 	"plusMenu.removeParam": "Remove parameter",
 	"plusMenu.addParam": "Add parameter",
-
 	"voiceMemo.microphoneError": "Could not access microphone",
 	"voiceMemo.uploadFailed": "Audio saved locally. Server upload failed.",
 	"voiceMemo.sttNotConfigured": "STT not configured. Set up in Settings → Audio.",
@@ -641,7 +599,6 @@
 	"voiceMemo.filename": "Filename",
 	"voiceMemo.filenamePlaceholder": "recording-name",
 	"voiceMemo.saved": "Saved ✓",
-
 	"admin.audio.title": "Audio",
 	"admin.audio.voiceMemos": "Voice Memos",
 	"admin.audio.enableVoiceMemos": "Enable Voice Memos",
@@ -677,7 +634,6 @@
 	"admin.audio.voiceModeSystemPrompt": "System prompt",
 	"admin.audio.voiceModeSystemPromptHint": "Applied only while voice mode is on. Keep it short to make spoken replies useful.",
 	"admin.audio.saveFailed": "Failed to save audio settings",
-
 	"admin.images.title": "Images",
 	"admin.images.generation": "Image Generation",
 	"admin.images.editing": "Image Editing",
@@ -688,7 +644,6 @@
 	"admin.images.editHint": "Compatible with OpenAI's images/edits API. If no edit key is set, the generation key is reused.",
 	"admin.images.editKeyPlaceholder": "Leave blank to reuse generation key",
 	"admin.images.saveFailed": "Failed to save image settings",
-
 	"sqlite.loadError": "Failed to load database.",
 	"sqlite.null": "NULL",
 	"sqlite.blob": "[BLOB {{size}}B]",
@@ -698,15 +653,11 @@
 	"sqlite.pageInfo": "{{start}}–{{end}} of {{total}}",
 	"sqlite.prev": "← Prev",
 	"sqlite.next": "Next →",
-
 	"preview.htmlTitle": "HTML Preview",
 	"preview.emptySheet": "Empty sheet",
-
 	"port.cannotConnect": "Cannot connect",
-
 	"connections.optional": "Optional",
 	"connections.leaveBlankPlaceholder": "••••••••  (leave blank to keep)",
-
 	"a11y.dismissNotification": "Dismiss notification",
 	"a11y.chatOptions": "Chat options",
 	"a11y.prevPage": "Previous page",
@@ -714,44 +665,36 @@
 	"a11y.splitEditor": "Split Editor",
 	"a11y.closePane": "Close pane",
 	"a11y.refreshChanges": "Refresh changes",
-
 	"keyboard.clickToRebind": "Click to rebind",
-
 	"bar.splitRight": "Split Right",
 	"bar.splitDown": "Split Down",
 	"bar.voiceMemo": "Voice Memo",
 	"bar.files": "Files",
-
 	"messaging.noBots": "No messaging bots configured.",
 	"messaging.failedToLoad": "Failed to load bots",
 	"messaging.failedToToggle": "Failed to toggle bot",
 	"messaging.failedToDelete": "Failed to delete bot",
 	"messaging.editBot": "Edit Bot",
-	"messaging.addBot": "Add Bot",
 	"messaging.name": "Name",
 	"messaging.platform": "Platform",
 	"messaging.token": "Token",
 	"messaging.tokenKeep": "Leave empty to keep current",
 	"messaging.tokenPaste": "Paste token",
-	"messaging.verify": "Verify",
 	"messaging.allowedSenders": "Allowed senders",
 	"messaging.allowedSendersHint": "Comma-separated user IDs. Leave empty to allow all.",
 	"messaging.save": "Save →",
 	"messaging.add": "Add →",
 	"messaging.failedToSave": "Failed to save",
-
 	"messaging.hint.telegram": "Create a bot via @BotFather",
 	"messaging.hint.discord": "Create a bot in the Developer Portal",
 	"messaging.hint.slack": "Bot Token | App Token (pipe-separated)",
 	"messaging.hint.whatsapp": "Access Token | Phone Number ID (pipe-separated)",
 	"messaging.hint.signal": "signal-cli URL | Phone Number (pipe-separated)",
-
 	"admin.gateway.keys": "Keys",
 	"admin.gateway.copy": "Copy",
 	"admin.gateway.baseUrl": "Base URL:",
 	"admin.gateway.apiKey": "API Key:",
 	"admin.gateway.headers": "Headers:",
-
 	"keyboard.action.newFile": "New File",
 	"keyboard.action.newTerminal": "New Terminal",
 	"keyboard.action.newChat": "New Chat",
@@ -765,7 +708,6 @@
 	"keyboard.action.toggleSidebar": "Toggle Sidebar",
 	"keyboard.action.voiceMemo": "Voice Memo",
 	"keyboard.conflict": "Also bound to {{action}}",
-
 	"chat.history.justNow": "Just now",
 	"chat.history.minutesAgo": "{{count}}m ago",
 	"chat.history.hoursAgo": "{{count}}h ago",
@@ -773,13 +715,11 @@
 	"chat.history.title": "Title",
 	"chat.history.updated": "Updated",
 	"chat.history.delete": "Delete",
-
 	"chat.edit.text": "Text",
 	"chat.edit.thought": "Thought",
 	"chat.thinking": "Thinking",
 	"chat.edit.tool": "Tool",
 	"chat.edit.item": "Item",
-
 	"chat.dictate.unsupported": "Speech recognition not supported in this browser.",
 	"chat.voiceModeOn": "Voice mode on",
 	"chat.voiceListening": "Listening...",
@@ -791,9 +731,7 @@
 	"chat.stopSpeaking": "Stop speaking",
 	"chat.fallbackTitle": "Chat",
 	"chat.greeting": "What can I help you with?",
-
 	"admin.toolServers": "Tool Servers",
-
 	"toolServers.title": "Tool Servers",
 	"toolServers.empty": "No tool servers configured",
 	"toolServers.add": "Add Server",
@@ -837,7 +775,6 @@
 	"toolServers.deleted": "Tool server deleted",
 	"toolServers.saveFailed": "Failed to save tool server",
 	"toolServers.deleteFailed": "Failed to delete tool server",
-
 	"admin.subagents": "Sub-agents",
 	"admin.subagentsEnabled": "Enable sub-agents",
 	"admin.subagentsHint": "Allow the AI to delegate tasks to sub-agents. Each sub-agent creates a real chat with full tool access. Uses additional LLM calls.",
@@ -853,12 +790,10 @@
 	"admin.subagentsSystemPrompt": "System prompt",
 	"admin.subagentsSystemPromptPlaceholder": "You are a sub-agent...",
 	"admin.subagentsSystemPromptHint": "Leave empty for the built-in default.",
-
 	"admin.contextCompaction": "Context compaction",
 	"admin.compactTokenThreshold": "Token threshold",
 	"admin.compactTokenThresholdUnit": "tokens",
 	"admin.compactTokenThresholdHint": "Older messages are summarized when estimated context exceeds this limit. Default: 80,000.",
-
 	"onboarding.welcomeTitle": "Your computer, from anywhere",
 	"onboarding.welcomeDesc": "Code, manage, and control your machine from any device.",
 	"onboarding.getStarted": "Get started →",
@@ -866,9 +801,13 @@
 	"onboarding.openFolderDesc": "Pick a project or folder to work with.",
 	"onboarding.skip": "Skip",
 	"onboarding.connectAi": "Connect AI",
+	"onboarding.provider": "Provider",
+	"onboarding.apiType": "API Type",
 	"onboarding.connectAiDesc": "Add an API key to unlock chat, code editing, and automations.",
 	"onboarding.connectAiSkip": "I'll do this later",
 	"onboarding.keyStaysLocal": "Your key stays on this machine.",
+	"onboarding.connected": "{{name}} connected",
+	"onboarding.next": "Next",
 	"onboarding.connect": "Connect →",
 	"onboarding.ready": "You're all set",
 	"onboarding.readyDesc": "A few things to try:",
@@ -883,9 +822,7 @@
 	"onboarding.suggestion4": "Help me write tests",
 	"onboarding.connectAiNudge": "Connect an AI provider to start chatting.",
 	"onboarding.goToConnections": "Settings → Connections",
-
 	"chat.share": "Share",
-
 	"general.storage": "Storage",
 	"general.cacheUsage": "Cache usage",
 	"general.persistentStorage": "Persistent storage",
