@@ -32,10 +32,14 @@
 	let appliedInitialSessionId = $state<string | null>(null);
 	let missingSessionId = $state<string | null>(null);
 	let forceStopSignal = $state(0);
+	let terminatingSessionId = $state<string | null>(null);
 
 	const runningSessions = $derived(commandSessions.filter((session) => !session.done));
 	const selectedSession = $derived(
 		runningSessions.find((session) => session.command_session_id === selectedSessionId) ?? null
+	);
+	const terminatingSelectedSession = $derived(
+		!!selectedSession && terminatingSessionId === selectedSession.command_session_id
 	);
 	const contextPercent = $derived(Math.max(0, Math.round(contextUsage?.percent ?? 0)));
 	const contextValue = $derived(
@@ -84,6 +88,12 @@
 		return 'Finished';
 	}
 
+	function terminateSelectedSession() {
+		if (!selectedSession || terminatingSelectedSession) return;
+		terminatingSessionId = selectedSession.command_session_id;
+		forceStopSignal += 1;
+	}
+
 	$effect(() => {
 		if (!initialCommandSessionId) return;
 		const exists = runningSessions.some(
@@ -123,11 +133,12 @@
 				</div>
 				<button
 					type="button"
-					class="h-7 shrink-0 px-1.5 text-xs text-gray-400 underline-offset-2 transition-colors duration-75 hover:text-gray-700 hover:underline dark:text-gray-600 dark:hover:text-gray-200"
-					title="Force terminate"
-					onclick={() => (forceStopSignal += 1)}
+					class="h-7 shrink-0 px-1.5 text-xs text-gray-400 underline-offset-2 transition-colors duration-75 hover:text-gray-700 hover:underline disabled:cursor-default disabled:text-gray-300 disabled:no-underline dark:text-gray-600 dark:hover:text-gray-200 dark:disabled:text-gray-700"
+					title={terminatingSelectedSession ? 'Terminating' : 'Force terminate'}
+					disabled={terminatingSelectedSession}
+					onclick={terminateSelectedSession}
 				>
-					Terminate
+					{terminatingSelectedSession ? 'Terminating' : 'Terminate'}
 				</button>
 			</div>
 			<div class="min-h-0 flex-1 bg-white dark:bg-black">
