@@ -365,9 +365,7 @@
 	{#if edit}
 		<!-- Edit mode -->
 		<div class="w-full">
-			<div
-				class="bg-gray-50 dark:bg-white/4 rounded-xl border border-gray-200 dark:border-white/8 px-3.5 py-2.5"
-			>
+			<div class="app-subtle-surface rounded-xl border px-3.5 py-2.5">
 				{#if editedOutput}
 					<OutputEditView
 						output={editedOutput}
@@ -379,14 +377,14 @@
 					<textarea
 						bind:this={textareaEl}
 						bind:value={editedContent}
-						class="w-full bg-transparent outline-none resize-none text-[13px] leading-relaxed text-gray-900 dark:text-gray-200"
+						class="w-full bg-transparent outline-none resize-none text-[0.8125rem] leading-relaxed text-gray-900 dark:text-gray-200"
 						oninput={autoResize}
 						onkeydown={handleKeydown}
 						rows="1"
 					></textarea>
 				{/if}
 			</div>
-			<div class="flex justify-between mt-2 text-[12px] font-medium">
+			<div class="flex justify-between mt-2 text-[0.75rem] font-medium">
 				<button
 					class="px-3 py-1 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
 					onclick={saveAsCopy}>{$t('chat.saveAs')}</button
@@ -408,7 +406,7 @@
 		<div>
 			{#if !done && (!output || output.length === 0)}
 				<MarkdownRenderer {content} /><span
-					class="inline-block w-[2px] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
+					class="inline-block w-[0.125rem] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
 				></span>
 			{:else}
 				{#if done && displayItems.length === 0 && content}
@@ -428,7 +426,7 @@
 						border border-gray-200 dark:border-white/8
 						hover:border-gray-300 dark:hover:border-white/12
 						hover:bg-gray-50/50 dark:hover:bg-white/[0.03]
-						transition-colors duration-150 {preview ? 'h-[70px]' : 'h-[38px]'}"
+						transition-colors duration-150 {preview ? 'h-[4.375rem]' : 'h-[2.375rem]'}"
 							onclick={() => {
 								const ws = get(currentWorkspace);
 								if (ws && artifact.path) {
@@ -446,7 +444,7 @@
 								{#if preview}
 									<div class="h-8 overflow-hidden">
 										<div
-											class="line-clamp-2 break-words text-[10px] leading-4 font-normal text-gray-400 dark:text-gray-500"
+											class="line-clamp-2 break-words text-[0.625rem] leading-4 font-normal text-gray-400 dark:text-gray-500"
 										>
 											{preview}
 										</div>
@@ -514,7 +512,7 @@
 						<MarkdownRenderer content={leftoverText} />
 					{/if}
 					<span
-						class="inline-block w-[2px] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
+						class="inline-block w-[0.125rem] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
 					></span>
 				{/if}
 			{/if}
@@ -539,7 +537,7 @@
 							/></svg
 						>
 					</button>
-					<span class="text-[11px] tabular-nums text-gray-400 dark:text-gray-600 select-none"
+					<span class="text-[0.6875rem] tabular-nums text-gray-400 dark:text-gray-600 select-none"
 						>{siblingIndex + 1}/{siblingTotal}</span
 					>
 					<button
@@ -672,9 +670,9 @@
 							<div
 								class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50
 									bg-gray-900 dark:bg-gray-800 text-gray-100 dark:text-gray-100
-									rounded-lg shadow-lg px-2.5 py-1.5 text-[10px] font-mono
+									rounded-lg shadow-lg px-2.5 py-1.5 text-[0.625rem] font-mono
 									whitespace-nowrap pointer-events-none
-									min-w-[160px] border border-transparent dark:border-gray-700"
+									min-w-[10rem] border border-transparent dark:border-gray-700"
 							>
 								<div class="space-y-0.5">
 									{#each Object.entries(usage) as [key, value]}
@@ -689,9 +687,9 @@
 								<!-- Arrow -->
 								<div
 									class="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0
-									border-l-[5px] border-l-transparent
-									border-r-[5px] border-r-transparent
-									border-t-[5px] border-t-gray-900 dark:border-t-gray-800"
+									border-l-[0.3125rem] border-l-transparent
+									border-r-[0.3125rem] border-r-transparent
+									border-t-[0.3125rem] border-t-gray-900 dark:border-t-gray-800"
 								></div>
 							</div>
 						{/if}

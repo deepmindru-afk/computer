@@ -3,6 +3,7 @@
 	import Icon from './Icon.svelte';
 	import Modal from './Modal.svelte';
 	import General from './Settings/General.svelte';
+	import Appearance from './Settings/Appearance.svelte';
 	import Memory from './Settings/Memory.svelte';
 	import PWA from './Settings/PWA.svelte';
 	import Account from './Settings/Account.svelte';
@@ -24,6 +25,7 @@
 
 	type Tab =
 		| 'general'
+		| 'appearance'
 		| 'memory'
 		| 'pwa'
 		| 'keyboard'
@@ -73,6 +75,7 @@
 	const personalTabs: SettingsTab[] = $derived.by(() => {
 		const tabs: SettingsTab[] = [
 			{ id: 'general', label: $t('settings.general'), icon: 'settings' },
+			{ id: 'appearance', label: $t('settings.appearance'), icon: 'sun-light' },
 			{ id: 'keyboard', label: $t('settings.keyboard'), icon: 'terminal' },
 			{ id: 'account', label: $t('settings.account'), icon: 'user' }
 		];
@@ -121,10 +124,10 @@
 
 <Modal
 	{onclose}
-	class="w-full max-w-3xl mx-4 md:mx-0 flex flex-col md:flex-row max-h-[85vh] md:h-[560px]"
+	class="w-full max-w-3xl mx-4 md:mx-0 flex flex-col md:flex-row max-h-[85vh] md:h-[35rem]"
 >
 	<nav
-		class="shrink-0 min-w-0 overflow-x-auto md:overflow-x-visible scrollbar-hidden border-b md:border-b-0 md:border-r border-gray-200 dark:border-white/6 md:w-[180px]"
+		class="shrink-0 min-w-0 md:min-h-0 overflow-x-auto md:overflow-x-hidden md:overflow-y-auto scrollbar-none border-b md:border-b-0 md:border-r border-gray-200 dark:border-white/6 md:w-[11.25rem]"
 	>
 		<div class="flex w-max min-w-full md:w-auto md:min-w-0 md:flex-col p-1 gap-px">
 			<button
@@ -151,7 +154,8 @@
 
 			<!-- Admin section -->
 			{#if isAdmin}
-				<span class="hidden md:block text-[10px] text-gray-400 dark:text-gray-600 px-2 mt-2 mb-0.5"
+				<span
+					class="hidden md:block text-[0.625rem] text-gray-400 dark:text-gray-600 px-2 mt-2 mb-0.5"
 					>{$t('sidebar.admin')}</span
 				>
 
@@ -171,9 +175,11 @@
 		</div>
 	</nav>
 
-	<div class="flex-1 overflow-y-auto min-h-0 p-4 md:px-5">
+	<div class="flex-1 overflow-y-auto scrollbar-none min-h-0 p-4 md:px-5">
 		{#if activeTab === 'general'}
 			<General />
+		{:else if activeTab === 'appearance'}
+			<Appearance />
 		{:else if activeTab === 'memory'}
 			<Memory />
 		{:else if activeTab === 'pwa' && showPwaSettings}

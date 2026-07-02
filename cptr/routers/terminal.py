@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from cptr.utils.config import check_access, get_auth_mode, get_user_uid_gid, AuthMode
-from cptr.utils.terminal import manager, IS_WINDOWS
+from cptr.utils.config import check_access
+from cptr.utils.terminal import TerminalUnavailable, manager, IS_WINDOWS
 from cptr.utils.tools import (
     command_session_bytes_since,
     drain_command_session_input,
@@ -58,7 +57,10 @@ class CommandSessionInfo(BaseModel):
 async def create_session(req: CreateSessionRequest):
     """Create a new terminal session."""
     logger.info(f"Creating terminal session: cwd={req.cwd}, rows={req.rows}, cols={req.cols}")
-    session = manager.create(rows=req.rows, cols=req.cols, cwd=req.cwd)
+    try:
+        session = manager.create(rows=req.rows, cols=req.cols, cwd=req.cwd)
+    except TerminalUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     logger.info(
         f"Created session {session.session_id} at {session.cwd}, fd={session._fd}, alive={session.is_alive()}"
     )
@@ -247,17 +249,18 @@ async def terminal_ws(websocket: WebSocket, session_id: str):
         try:
             if IS_WINDOWS:
                 # Windows ProactorEventLoop doesn't support add_reader;
-                # fall back to minimal-sleep polling.
+                # pywinpty read() blocks, so run it outside the event loop.
                 while True:
                     if not session.is_alive():
                         logger.info(f"Session {session_id} died, stopping read")
                         break
                     try:
-                        data = session.read(16384)
+                        data = await asyncio.to_thread(session.read, 16384)
                         if data:
                             await websocket.send_bytes(data)
-                        else:
-                            await asyncio.sleep(0.005)
+                    except EOFError:
+                        logger.info(f"Session {session_id} reached EOF")
+                        break
                     except (OSError, IOError) as e:
                         logger.error(f"PTY read error for {session_id}: {e}")
                         break

@@ -2,6 +2,7 @@
 	import type { Editor } from '@tiptap/core';
 	import Icon from '../Icon.svelte';
 	import { tooltip } from '$lib/tooltip';
+	import { t } from '$lib/i18n';
 
 	interface Props {
 		editor: Editor;
@@ -75,42 +76,42 @@
 			class="tb-btn"
 			class:active={active.bold}
 			onclick={() => editor.chain().focus().toggleBold().run()}
-			use:tooltip={'Bold (⌘B)'}><strong>B</strong></button
+			use:tooltip={$t('markdown.boldShortcut')}><strong>B</strong></button
 		>
 
 		<button
 			class="tb-btn"
 			class:active={active.italic}
 			onclick={() => editor.chain().focus().toggleItalic().run()}
-			use:tooltip={'Italic (⌘I)'}><em>I</em></button
+			use:tooltip={$t('markdown.italicShortcut')}><em>I</em></button
 		>
 
 		<button
 			class="tb-btn"
 			class:active={active.underline}
 			onclick={() => editor.chain().focus().toggleUnderline().run()}
-			use:tooltip={'Underline (⌘U)'}><u>U</u></button
+			use:tooltip={$t('markdown.underlineShortcut')}><u>U</u></button
 		>
 
 		<button
 			class="tb-btn"
 			class:active={active.strike}
 			onclick={() => editor.chain().focus().toggleStrike().run()}
-			use:tooltip={'Strikethrough'}><s>S</s></button
+			use:tooltip={$t('markdown.strikethrough')}><s>S</s></button
 		>
 
 		<button
 			class="tb-btn"
 			class:active={active.code}
 			onclick={() => editor.chain().focus().toggleCode().run()}
-			use:tooltip={'Inline code'}><Icon name="code" size={12} /></button
+			use:tooltip={$t('markdown.inlineCode')}><Icon name="code" size={12} /></button
 		>
 
 		<button
 			class="tb-btn"
 			class:active={active.highlight}
 			onclick={() => editor.chain().focus().toggleHighlight().run()}
-			use:tooltip={'Highlight'}><span class="highlight-icon">H</span></button
+			use:tooltip={$t('markdown.highlight')}><span class="highlight-icon">H</span></button
 		>
 
 		<span class="tb-divider"></span>
@@ -120,21 +121,21 @@
 			class="tb-btn heading-btn"
 			class:active={active.h1}
 			onclick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-			use:tooltip={'Heading 1'}>H1</button
+			use:tooltip={$t('markdown.heading1')}>H1</button
 		>
 
 		<button
 			class="tb-btn heading-btn"
 			class:active={active.h2}
 			onclick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-			use:tooltip={'Heading 2'}>H2</button
+			use:tooltip={$t('markdown.heading2')}>H2</button
 		>
 
 		<button
 			class="tb-btn heading-btn"
 			class:active={active.h3}
 			onclick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-			use:tooltip={'Heading 3'}>H3</button
+			use:tooltip={$t('markdown.heading3')}>H3</button
 		>
 
 		<span class="tb-divider"></span>
@@ -144,21 +145,21 @@
 			class="tb-btn"
 			class:active={active.bulletList}
 			onclick={() => editor.chain().focus().toggleBulletList().run()}
-			use:tooltip={'Bullet list'}><Icon name="list" size={12} /></button
+			use:tooltip={$t('markdown.bulletList')}><Icon name="list" size={12} /></button
 		>
 
 		<button
 			class="tb-btn"
 			class:active={active.orderedList}
 			onclick={() => editor.chain().focus().toggleOrderedList().run()}
-			use:tooltip={'Numbered list'}><Icon name="list-ordered" size={12} /></button
+			use:tooltip={$t('markdown.numberedList')}><Icon name="list-ordered" size={12} /></button
 		>
 
 		<button
 			class="tb-btn"
 			class:active={active.taskList}
 			onclick={() => editor.chain().focus().toggleTaskList().run()}
-			use:tooltip={'Task list'}><Icon name="check-square" size={12} /></button
+			use:tooltip={$t('markdown.taskList')}><Icon name="check-square" size={12} /></button
 		>
 
 		<span class="tb-divider"></span>
@@ -168,20 +169,20 @@
 			class="tb-btn"
 			class:active={active.blockquote}
 			onclick={() => editor.chain().focus().toggleBlockquote().run()}
-			use:tooltip={'Quote'}><Icon name="quote" size={12} /></button
+			use:tooltip={$t('markdown.quote')}><Icon name="quote" size={12} /></button
 		>
 
 		<button
 			class="tb-btn"
 			class:active={active.codeBlock}
 			onclick={() => editor.chain().focus().toggleCodeBlock().run()}
-			use:tooltip={'Code block'}>{'{ }'}</button
+			use:tooltip={$t('markdown.codeBlock')}>{'{ }'}</button
 		>
 
 		<button
 			class="tb-btn"
 			onclick={() => editor.chain().focus().setHorizontalRule().run()}
-			use:tooltip={'Horizontal rule'}>──</button
+			use:tooltip={$t('markdown.horizontalRule')}>──</button
 		>
 
 		<span class="tb-divider"></span>
@@ -191,7 +192,7 @@
 			class="tb-btn"
 			onclick={() =>
 				editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
-			use:tooltip={'Insert table'}><Icon name="table" size={12} /></button
+			use:tooltip={$t('markdown.insertTable')}><Icon name="table" size={12} /></button
 		>
 
 		<!-- Undo/Redo -->
@@ -201,14 +202,14 @@
 			class="tb-btn"
 			onclick={() => editor.chain().focus().undo().run()}
 			disabled={!editor.can().undo()}
-			use:tooltip={'Undo (⌘Z)'}><Icon name="undo" size={12} /></button
+			use:tooltip={$t('markdown.undoShortcut')}><Icon name="undo" size={12} /></button
 		>
 
 		<button
 			class="tb-btn"
 			onclick={() => editor.chain().focus().redo().run()}
 			disabled={!editor.can().redo()}
-			use:tooltip={'Redo (⌘⇧Z)'}><Icon name="redo" size={12} /></button
+			use:tooltip={$t('markdown.redoShortcut')}><Icon name="redo" size={12} /></button
 		>
 	</div>
 </div>
@@ -219,8 +220,8 @@
 	.editor-toolbar {
 		display: flex;
 		align-items: center;
-		height: 36px;
-		padding: 0 8px;
+		height: 2.25rem;
+		padding: 0 0.5rem;
 		border-bottom: 1px solid var(--color-gray-200);
 		background: white;
 		flex-shrink: 0;
@@ -235,7 +236,7 @@
 	.toolbar-scroll {
 		display: flex;
 		align-items: center;
-		gap: 1px;
+		gap: 0.0625rem;
 		overflow-x: auto;
 		overflow-y: hidden;
 		scrollbar-width: none;
@@ -251,14 +252,14 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		min-width: 28px;
-		height: 28px;
-		padding: 0 6px;
+		min-width: 1.75rem;
+		height: 1.75rem;
+		padding: 0 0.375rem;
 		border: none;
-		border-radius: 5px;
+		border-radius: 0.3125rem;
 		background: transparent;
 		color: var(--color-gray-500);
-		font-size: 12px;
+		font-size: 0.75rem;
 		font-weight: 500;
 		cursor: pointer;
 		transition: all 0.1s;
@@ -296,16 +297,16 @@
 	}
 
 	.heading-btn {
-		font-size: 11px;
+		font-size: 0.6875rem;
 		font-weight: 700;
 		font-family: inherit;
 	}
 
 	.tb-divider {
 		width: 1px;
-		height: 16px;
+		height: 1rem;
 		background: var(--color-gray-200);
-		margin: 0 4px;
+		margin: 0 0.25rem;
 		flex-shrink: 0;
 	}
 
@@ -315,10 +316,10 @@
 
 	.highlight-icon {
 		background: rgba(255, 213, 79, 0.4);
-		border-radius: 2px;
-		padding: 0 3px;
+		border-radius: 0.125rem;
+		padding: 0 0.1875rem;
 		font-weight: 700;
-		font-size: 11px;
+		font-size: 0.6875rem;
 	}
 
 	/* ── Mobile: pin to bottom above keyboard ────── */
@@ -329,8 +330,8 @@
 			left: 0;
 			right: 0;
 			z-index: 60;
-			height: 44px;
-			padding: 0 12px;
+			height: 2.75rem;
+			padding: 0 0.75rem;
 			border-bottom: none;
 			border-top: 1px solid var(--color-gray-200);
 			padding-bottom: env(safe-area-inset-bottom, 0);
@@ -342,9 +343,9 @@
 		}
 
 		.tb-btn {
-			min-width: 36px;
-			height: 36px;
-			font-size: 13px;
+			min-width: 2.25rem;
+			height: 2.25rem;
+			font-size: 0.8125rem;
 		}
 	}
 </style>

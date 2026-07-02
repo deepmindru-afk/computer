@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Token } from 'marked';
 	import { openFileTab, setFileBrowserCwd, setActiveTab } from '$lib/stores';
+	import { t } from '$lib/i18n';
 
 	interface Props {
 		items: Token[];
@@ -69,7 +70,7 @@
 			{@const fileName = filePath.split('/').pop() || filePath}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<button
-				class="inline-flex items-center gap-1 px-1 py-px rounded text-[13px] leading-snug font-medium cursor-pointer border-none text-blue-500 dark:text-blue-400 hover:bg-blue-500/8 transition-colors align-baseline"
+				class="inline-flex items-center gap-1 px-1 py-px rounded text-[0.8125rem] leading-snug font-medium cursor-pointer border-none text-blue-500 dark:text-blue-400 hover:bg-blue-500/8 transition-colors align-baseline"
 				title={filePath}
 				onclick={(e) => {
 					e.preventDefault();
@@ -138,7 +139,7 @@
 		{#if wl}
 			<span
 				class="text-blue-500 dark:text-blue-400 bg-blue-500/8 dark:bg-blue-400/10 rounded px-1 cursor-pointer hover:underline transition-colors"
-				title="Link to {wl.target}">{wl.label}</span
+				title={$t('markdown.linkTo', { target: wl.target })}>{wl.label}</span
 			>
 		{/if}
 	{/if}

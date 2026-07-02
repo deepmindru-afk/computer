@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { t } from '$lib/i18n';
+
 	interface Props {
-		/** Size in px or Tailwind class like '3.5' or '5'. Defaults to 16px. */
+		/** Size in px or Tailwind class like '3.5' or '5'. Defaults to 1rem. */
 		size?: number | string;
 		/** Border width in px. Scales automatically if not set. */
 		borderWidth?: number;
@@ -17,7 +19,7 @@
 	class="spinner {className}"
 	style="width:{px}px;height:{px}px;border-width:{bw}px"
 	role="status"
-	aria-label="Loading"
+	aria-label={$t('common.loading')}
 ></div>
 
 <style>
@@ -26,7 +28,7 @@
 		border-style: solid;
 		border-color: var(--color-gray-300);
 		border-top-color: var(--color-gray-600);
-		border-radius: 9999px;
+		border-radius: 624.9375rem;
 		animation: spin 0.75s linear infinite;
 		flex-shrink: 0;
 	}
