@@ -11,6 +11,7 @@ import logging
 import re
 import uuid
 
+from cptr.events import EVENTS, publish_event
 from cptr.env import CHAT_MAX_ITERATIONS, CHAT_TOOL_COMMAND_MAX_CHARS, CHAT_TOOL_MAX_CHARS
 from cptr.utils.context import resolve_compact_token_threshold, should_compact
 from cptr.utils.skills import discover_skills, load_skill, format_skill_content
@@ -48,6 +49,104 @@ PLAN_MODE_PROMPT = (
     "using create_artifact. Then wait for an explicit approval message before using "
     "tools or implementing."
 )
+
+SKILLS_CREATE_RE = re.compile(r"^/skills:create(?:\s+(.*))?$", re.IGNORECASE | re.DOTALL)
+
+COMPUTER_SKILL_AUTHORING_STANDARDS = """\
+Follow the Computer skill-authoring standards:
+
+Frontmatter:
+- name: lowercase-hyphenated, <=64 chars, no spaces.
+- description: one sentence, <=60 characters, ends with a period. State the
+  capability, not the implementation. Do not repeat the skill name. Avoid
+  marketing words like powerful, comprehensive, seamless, advanced, or robust.
+  Count the characters before saving.
+- version: 0.1.0.
+- platforms: declare [macos], [linux], or [windows] only when the skill uses
+  OS-bound primitives. Omit it for portable skills.
+
+Body section order:
+1. "# <Human Title>" plus a short intro covering what it does, what it does not
+   do, and important dependency assumptions.
+2. "## When to Use" with concrete trigger phrases.
+3. "## Prerequisites" with exact env vars, credentials, install steps, or "None".
+4. "## How to Run" with the canonical workflow framed through Computer tools.
+5. "## Quick Reference" with flat commands, routes, files, or APIs.
+6. "## Procedure" with numbered, copy-paste-exact steps.
+7. "## Pitfalls" with known limits and failure modes.
+8. "## Verification" with one focused check that proves the skill works.
+
+Computer-tool framing:
+- Reference Computer tools by name in backticks: `read_file`, `list_directory`,
+  `search_files`, `web_search`, `read_url`, `run_command`, `view_skill`,
+  and `manage_skill`.
+- Frame shell work as "run through `run_command`".
+- Prefer Computer tools in prose over raw shell utilities when a tool exists:
+  say `read_file` instead of cat/head/tail, `search_files` instead of grep/rg/find,
+  and `read_url` instead of curl-to-scrape.
+- Third-party CLIs are fine inside procedures or scripts, but explain that the
+  agent invokes them through `run_command`.
+
+Quality bar:
+- Prefer exact commands, routes, file paths, function names, config keys, and
+  error text found verbatim in the sources. Do not invent flags, paths, APIs,
+  or behavior.
+- Keep SKILL.md tight and scannable: about 100 lines for a simple workflow,
+  about 200 for a complex one.
+- Do not create a router/index/hub skill that only points at other skills.
+- Put larger reusable scripts in `scripts/`, detailed docs in `references/`,
+  reusable outputs in `templates/`, and binary or visual assets in `assets/`.
+- New skills default to workspace scope. Do not use scope="global" unless the
+  user explicitly asks for a global skill."""
+
+
+def _build_skill_create_prompt(user_request: str) -> str:
+    req = (user_request or "").strip()
+    if not req:
+        req = (
+            "the workflow we just went through in this conversation - review the "
+            "steps taken and distill them into a reusable skill"
+        )
+    return (
+        "[/skills:create] The user wants you to create a reusable Computer skill "
+        "from the request below and save it.\n\n"
+        f"THE REQUEST:\n{req}\n\n"
+        "The request is open-ended and may mix SOURCES to gather (directories, "
+        "file paths, URLs, what we just did, pasted notes) and REQUIREMENTS that "
+        "shape the skill (focus, exclusions, scope, naming, style, constraints). "
+        "Treat every part of the request as load-bearing. Prose after a path or "
+        "URL is not incidental; it is authoring guidance. Never fetch the first "
+        "source and ignore the rest.\n\n"
+        "Do this:\n"
+        "1. Gather every source the user named with the tools you already have: "
+        "`read_file`/`search_files`/`list_directory` for local files or directories, "
+        "`web_search`/`read_url` for web sources, the current conversation if they "
+        "refer to what just happened, and pasted text as-is. If scope is ambiguous, "
+        "make a reasonable choice and note it; do not stall.\n"
+        "2. Apply every requirement, focus, and constraint in the request to what "
+        "the skill covers and emphasizes.\n"
+        "3. Author one SKILL.md using the standards below.\n"
+        '4. Save it with manage_skill(action="create", name=..., content=...). '
+        "If the skill needs supporting files, add them after the create with "
+        'manage_skill(action="write_file", name=..., file_path=..., '
+        "file_content=...).\n\n"
+        f"{COMPUTER_SKILL_AUTHORING_STANDARDS}\n\n"
+        "When done, tell the user the skill name, location, and one-line summary."
+    )
+
+
+def _apply_skills_create_prompt(messages: list[dict]) -> bool:
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        text = _plain_message_text(message.get("content"))
+        match = SKILLS_CREATE_RE.match(text.strip())
+        if not match:
+            return False
+        message["content"] = _build_skill_create_prompt(match.group(1) or "")
+        return True
+    return False
+
 
 # ── Task registry ───────────────────────────────────────────
 
@@ -777,21 +876,33 @@ def _tool_result_for_model(tool_name: str, result: str) -> str:
     if not isinstance(images, list):
         return result
 
+    image_files = [
+        {
+            "path": image.get("path"),
+            "name": image.get("name"),
+            "content_type": image.get("content_type"),
+        }
+        for image in images
+        if isinstance(image, dict) and image.get("path")
+    ]
+
     return json.dumps(
         {
             "status": meta.get("status", "success"),
-            "displayed_to_user": True,
-            "note": "The generated image is already displayed in the chat. Do not include markdown image links for it.",
-            "images": [
+            "displayed_to_user": False,
+            "must_call": "display_file",
+            "instruction": (
+                "Do not answer the user yet. The image file is saved but not rendered. "
+                "Call display_file once for each path below."
+            ),
+            "display_file_calls": [
                 {
-                    "id": image.get("id"),
-                    "path": image.get("path"),
-                    "name": image.get("name"),
-                    "mime_type": image.get("mime_type"),
+                    "name": "display_file",
+                    "arguments": {"path": image["path"]},
                 }
-                for image in images
-                if isinstance(image, dict)
+                for image in image_files
             ],
+            "images": image_files,
         }
     )
 
@@ -1100,30 +1211,6 @@ def build_artifact_item(tool_name: str, arguments: dict, result: str) -> dict | 
     }
 
 
-def build_image_item(tool_name: str, result: str) -> dict | None:
-    """Build a renderable image output item for image-generation tools."""
-    if tool_name != "image_generate":
-        return None
-
-    try:
-        meta = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
-        return None
-
-    images = meta.get("images")
-    if not isinstance(images, list) or not images:
-        return None
-
-    return {
-        "type": "image",
-        "images": [
-            image
-            for image in images
-            if isinstance(image, dict) and isinstance(image.get("url"), str)
-        ],
-    }
-
-
 def _default_base_url(provider: str) -> str:
     return {
         "anthropic": "https://api.anthropic.com/v1",
@@ -1181,6 +1268,10 @@ async def run_chat_task(
             workspace=workspace,
             workspace_name=ws_name,
         )
+
+    event_workspace = (
+        {"id": workspace, "name": workspace.rstrip("/").rsplit("/", 1)[-1]} if workspace else None
+    )
 
     # Load existing state so continuations don't overwrite previous output
     msg = await ChatMessage.get_by_id(message_id)
@@ -1270,6 +1361,7 @@ async def run_chat_task(
     async def _run_agent_target(agent_target: AgentModelTarget):
         nonlocal content, text_buffer
         from cptr.utils.agents.claude_code import run_claude_code_agent
+        from cptr.utils.agents.cline import run_cline_agent
         from cptr.utils.agents.codex import run_codex_agent
         from cptr.utils.agents.cursor import run_cursor_agent
         from cptr.utils.agents.grok import run_grok_agent
@@ -1278,6 +1370,7 @@ async def run_chat_task(
         chat_obj = await Chat.get_by_id(chat_id)
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
         messages, loaded_summary = await _load_message_history(chat_id, message_id)
+        _apply_skills_create_prompt(messages)
         memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
         system = await _load_system_prompt(
             workspace,
@@ -1322,6 +1415,7 @@ async def run_chat_task(
             "cursor": run_cursor_agent,
             "grok": run_grok_agent,
             "opencode": run_opencode_agent,
+            "cline": run_cline_agent,
         }
         runner = runners.get(agent_target.agent)
         if runner is None:
@@ -1493,6 +1587,16 @@ async def run_chat_task(
                 )
                 _task_state.pop(message_id, None)
                 await _emit_done()
+                preview = content[:300] if content else ""
+                await publish_event(
+                    EVENTS.CHAT_FINISHED,
+                    actor={"id": user_id},
+                    subject_id=chat_id,
+                    subject_type="chat",
+                    source="chat_task",
+                    data={"workspace": event_workspace, "preview": preview},
+                    message=preview,
+                )
                 return
 
         flushed_item = _flush_text()
@@ -1501,6 +1605,16 @@ async def run_chat_task(
         await _save_message("agent stream ended", content=content, output=output_items, done=True)
         _task_state.pop(message_id, None)
         await _emit_done()
+        preview = content[:300] if content else ""
+        await publish_event(
+            EVENTS.CHAT_FINISHED,
+            actor={"id": user_id},
+            subject_id=chat_id,
+            subject_type="chat",
+            source="chat_task",
+            data={"workspace": event_workspace, "preview": preview},
+            message=preview,
+        )
         return
 
     try:
@@ -1518,6 +1632,7 @@ async def run_chat_task(
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
         configured_model = (msg.model if msg else None) or model
         messages, loaded_summary = await _load_message_history(chat_id, message_id)
+        _apply_skills_create_prompt(messages)
         memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
         system = await _load_system_prompt(
             workspace,
@@ -1776,30 +1891,8 @@ async def run_chat_task(
                     last_usage = usage
                     new_messages_since = 0
 
-                    if not pending_calls:
-                        # No tool calls — final response, we're done
-                        _flush_text()
-                        if streamed_reasoning_chars and not response_reasoning_items:
-                            logger.warning(
-                                "[task %s] reasoning output streamed (%d chars) but no completed reasoning item arrived before usage; DB output may contain only in-progress reasoning",
-                                message_id[:8],
-                                streamed_reasoning_chars,
-                            )
-                        await _save_message(
-                            "usage",
-                            content=content,
-                            output=output_items,
-                            usage=usage,
-                            done=True,
-                        )
-                        _task_state.pop(message_id, None)
-                        await _emit_done()
-                        return
-
                 elif event["type"] == "done":
-                    # Stream ended — if usage already triggered a save+return, we won't
-                    # reach here. This is the fallback for providers that don't support
-                    # stream_options.include_usage.
+                    # Stream ended. Usage may have arrived earlier, multiple times, or never.
                     if not pending_calls:
                         _flush_text()
                         if streamed_reasoning_chars and not response_reasoning_items:
@@ -1809,7 +1902,7 @@ async def run_chat_task(
                                 streamed_reasoning_chars,
                             )
                         await _save_message(
-                            "done fallback",
+                            "done",
                             content=content,
                             output=output_items,
                             usage=last_usage,
@@ -1817,6 +1910,16 @@ async def run_chat_task(
                         )
                         _task_state.pop(message_id, None)
                         await _emit_done()
+                        preview = content[:300] if content else ""
+                        await publish_event(
+                            EVENTS.CHAT_FINISHED,
+                            actor={"id": user_id},
+                            subject_id=chat_id,
+                            subject_type="chat",
+                            source="chat_task",
+                            data={"workspace": event_workspace, "preview": preview},
+                            message=preview,
+                        )
                         return
 
             # ── Process collected tool calls ────────────────────
@@ -1873,7 +1976,7 @@ async def run_chat_task(
                     )
                     if flushed_item:
                         await emit(output=flushed_item)
-                    await emit(output=item)
+                        await emit(output=item)
                     _task_state.pop(message_id, None)
                     await emit(done=True)
                     return
@@ -1916,7 +2019,11 @@ async def run_chat_task(
                     if tc["name"] == "create_artifact":
                         result = await create_artifact(**tc["arguments"], workspace=workspace)
                     else:
-                        result = await execute_tool(tc["name"], tc["arguments"], tool_ctx)
+                        result = await execute_tool(
+                            tc["name"],
+                            tc["arguments"],
+                            {**tool_ctx, "call_id": tc["call_id"]},
+                        )
 
                     # Append output BEFORE marking completed — if anything
                     # between here and persist fails, the call stays
@@ -1939,11 +2046,15 @@ async def run_chat_task(
                         await emit(output=artifact_item)
                         _sync_state()
 
-                    image_item = build_image_item(tc["name"], result)
-                    if image_item:
-                        output_items.append(image_item)
-                        await emit(output=image_item)
-                        _sync_state()
+                    if tc["name"] == "display_file":
+                        try:
+                            file_item = json.loads(result)
+                        except (json.JSONDecodeError, TypeError):
+                            file_item = None
+                        if isinstance(file_item, dict) and file_item.get("type") == "file":
+                            output_items.append(file_item)
+                            await emit(output=file_item)
+                            _sync_state()
 
                     sequential_results.append((tc, result))
 
@@ -1965,7 +2076,11 @@ async def run_chat_task(
                     for idx in delegate_indices:
                         tc, _ = call_items[idx]
                         task = asyncio.create_task(
-                            execute_tool(tc["name"], tc["arguments"], tool_ctx)
+                            execute_tool(
+                                tc["name"],
+                                tc["arguments"],
+                                {**tool_ctx, "call_id": tc["call_id"]},
+                            )
                         )
                         inflight[task] = idx
 
@@ -2020,10 +2135,21 @@ async def run_chat_task(
                     "end",
                     content=content,
                     output=output_items,
+                    usage=last_usage,
                     done=True,
                 )
                 _task_state.pop(message_id, None)
                 await _emit_done()
+                preview = content[:300] if content else ""
+                await publish_event(
+                    EVENTS.CHAT_FINISHED,
+                    actor={"id": user_id},
+                    subject_id=chat_id,
+                    subject_type="chat",
+                    source="chat_task",
+                    data={"workspace": event_workspace, "preview": preview},
+                    message=preview,
+                )
                 return
 
         # Max iterations reached
@@ -2036,6 +2162,15 @@ async def run_chat_task(
         )
         _task_state.pop(message_id, None)
         await _emit_done()
+        await publish_event(
+            EVENTS.CHAT_FAILED,
+            actor={"id": user_id},
+            subject_id=chat_id,
+            subject_type="chat",
+            source="chat_task",
+            data={"workspace": event_workspace, "preview": "Max iterations reached."},
+            message="Max iterations reached.",
+        )
 
     except asyncio.CancelledError:
         _flush_text()
@@ -2077,6 +2212,15 @@ async def run_chat_task(
         )
         _task_state.pop(message_id, None)
         await emit(done=True, error=error_msg)
+        await publish_event(
+            EVENTS.CHAT_FAILED,
+            actor={"id": user_id},
+            subject_id=chat_id,
+            subject_type="chat",
+            source="chat_task",
+            data={"workspace": event_workspace, "preview": error_msg[:300] if error_msg else ""},
+            message=error_msg[:300] if error_msg else "",
+        )
     finally:
         # Guarantee the gateway SSE stream terminates.  If emit()
         # already pushed a done/error event the sentinel is harmless
@@ -2120,18 +2264,6 @@ async def run_chat_task(
             logger.debug(
                 "[title] Error in title generation for chat %s", chat_id[:8], exc_info=True
             )
-        # Fire webhook notification if configured
-        try:
-            webhook_url = await Config.get("notifications.webhook_url")
-            if webhook_url:
-                chat_obj = chat_obj or await Chat.get_by_id(chat_id)
-                title = chat_obj.title if chat_obj else "Chat"
-                preview = content[:300] if content else ""
-                from cptr.utils.webhook import post_webhook
-
-                await post_webhook(webhook_url, title, preview)
-        except Exception:
-            logger.debug("[webhook] Error sending webhook for chat %s", chat_id[:8], exc_info=True)
         # Best-effort post-turn memory review. Runs detached and never competes
         # with queued user input processing.
         try:

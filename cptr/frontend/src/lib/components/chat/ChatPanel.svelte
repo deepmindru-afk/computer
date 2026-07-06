@@ -53,7 +53,11 @@
 	import AssistantMessage from './AssistantMessage.svelte';
 	import ChatHistory from './ChatHistory.svelte';
 	import StatusModal from './StatusModal.svelte';
+	import SkillsModal from './SkillsModal.svelte';
+	import { listCommandSessions, type CommandSession } from '$lib/apis/terminal';
+	import { getSkills, type SkillInfo } from '$lib/apis/skills';
 	import Spinner from '../common/Spinner.svelte';
+	import Icon from '../Icon.svelte';
 	import { toast } from 'svelte-sonner';
 	import { t } from '$lib/i18n';
 
@@ -77,14 +81,19 @@
 	let currentMessageId = $state<string | null>(null);
 	let contextUsage = $state<ContextUsage | null>(null);
 	let showStatusModal = $state(false);
+	let showSkillsModal = $state(false);
+	let skillsModalList = $state<SkillInfo[]>([]);
+	let commandSessions = $state<CommandSession[]>([]);
+	let initialCommandSessionId = $state<string | null>(null);
 	let previousChats = $state<ChatInfo[]>([]);
 	let messagesEl: HTMLDivElement;
 	let chatInputEl: ChatInput;
+	let statusButtonEl: HTMLButtonElement | undefined = $state();
 	let sending = $state(false);
 	let autoScroll = $state(true);
 	let cancelledMessageId: string | null = null;
 	let loading = $state(!!initialChatId);
-	let chatTitle = '';
+	let chatTitle = $state('');
 	let ttsQueue: string[] = [];
 	let ttsBuffer = '';
 	let ttsInsideCodeFence = false;
@@ -97,6 +106,7 @@
 	let ttsErrorShown = false;
 	let speakingMessageId = $state<string | null>(null);
 	let ttsStopRequested = false;
+	let commandSessionsChatId: string | null = null;
 	// This browser memory cache only helps while the current page is open, such as when
 	// someone taps the same speak button twice. The backend cache is the durable source
 	// for cross-session reuse and the workspace data flywheel.
@@ -106,6 +116,7 @@
 	const TTS_AUDIO_CACHE_LIMIT_BYTES = 20 * 1024 * 1024;
 	const TTS_MAX_PREFETCH = 2;
 	let unbindSocketListeners: (() => void) | null = null;
+	let commandSessionsTimer: ReturnType<typeof setInterval> | null = null;
 
 	onMount(() => {
 		if (initialChatId || typeof sessionStorage === 'undefined') return;
@@ -283,6 +294,14 @@
 	const streaming = $derived(allMessages.some((m) => m.role === 'assistant' && !m.done));
 	const isLanding = $derived(allMessages.length === 0 && !chatId);
 	const workspaceDisplayName = $derived(getPathDisplayName(workspace, 'workspace'));
+	const displayChatTitle = $derived(chatTitle || firstUserMessageTitle() || workspaceDisplayName);
+	const runningCommandSessions = $derived(commandSessions.filter((session) => !session.done));
+	const summaryCount = $derived(runningCommandSessions.length);
+	const statusButtonClass =
+		'text-gray-400 hover:bg-gray-50 hover:text-gray-700 dark:text-gray-600 dark:hover:bg-white/5 dark:hover:text-gray-300';
+	const statusTitle = $derived(
+		summaryCount > 0 ? `${summaryCount} active command session` : 'Status'
+	);
 
 	// Queued messages: user-authored messages waiting behind an active response.
 	const queuedMessages = $derived(
@@ -295,6 +314,13 @@
 			)
 			.map((m) => ({ id: m.id, content: m.content }))
 	);
+
+	$effect(() => {
+		if (chatId === commandSessionsChatId) return;
+		commandSessionsChatId = chatId;
+		commandSessions = [];
+		if (chatId) refreshCommandSessions();
+	});
 
 	// ── Load chat from DB ───────────────────────────────────────
 
@@ -531,6 +557,9 @@
 		} else {
 			loadPreviousChats();
 		}
+		refreshCommandSessions();
+		commandSessionsTimer = setInterval(refreshCommandSessions, 5000);
+		window.addEventListener('cptr:inspect-command-session', handleInspectCommandSession);
 
 		const offChat = socketStore.on('events:chat', handleSocketEvent);
 		const offConnect = socketStore.on('connect', handleReconnect);
@@ -544,6 +573,9 @@
 		stopTtsPlayback();
 		unbindSocketListeners?.();
 		unbindSocketListeners = null;
+		if (commandSessionsTimer) clearInterval(commandSessionsTimer);
+		commandSessionsTimer = null;
+		window.removeEventListener('cptr:inspect-command-session', handleInspectCommandSession);
 		if (landingRefreshTimer) clearTimeout(landingRefreshTimer);
 		// Don't clear streamingChatTabs here -- the global listener in
 		// chat.ts handles cleanup when the "done" event arrives, so the
@@ -655,6 +687,11 @@
 		}
 		if (text === '/status') {
 			handleStatusCommand();
+			inputText = '';
+			return;
+		}
+		if (text === '/skills:list') {
+			await handleSkillsListCommand();
 			inputText = '';
 			return;
 		}
@@ -825,8 +862,49 @@
 		planMode.set(!get(planMode));
 	}
 
+	function firstUserMessageTitle(): string {
+		const message = allMessages.find((m) => m.role === 'user' && !isPendingHiddenMessage(m));
+		return message ? message.content.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+	}
+
 	function handleStatusCommand() {
+		if (isLanding) return;
+		initialCommandSessionId = null;
 		showStatusModal = true;
+		refreshCommandSessions();
+	}
+
+	async function handleSkillsListCommand() {
+		try {
+			skillsModalList = await getSkills(workspace);
+			showSkillsModal = true;
+		} catch (err: any) {
+			toast.error(err?.message || 'Failed to load skills');
+		}
+	}
+
+	async function refreshCommandSessions() {
+		const currentChatId = chatId;
+		if (!currentChatId) {
+			commandSessions = [];
+			return;
+		}
+		try {
+			const sessions = await listCommandSessions(workspace, currentChatId);
+			if (chatId !== currentChatId) return;
+			commandSessions = sessions;
+		} catch (err) {
+			console.error('[chat] command sessions refresh error', err);
+			if (chatId === currentChatId) commandSessions = [];
+		}
+	}
+
+	function handleInspectCommandSession(e: Event) {
+		const id = (e as CustomEvent<{ commandSessionId?: string }>).detail?.commandSessionId;
+		if (!id) return;
+		initialCommandSessionId = id;
+		showStatusModal = true;
+		refreshCommandSessions();
 	}
 
 	// ── Queue actions ──────────────────────────────────────────
@@ -1354,7 +1432,33 @@
 	}
 </script>
 
-<div class="flex flex-col h-full bg-white dark:bg-black">
+<div
+	class="app-theme relative flex h-full flex-col"
+	style="background: var(--app-bg); color: var(--app-fg);"
+>
+	{#if !isLanding}
+		<div
+			class="flex h-7 shrink-0 items-center gap-2 border-b border-gray-100 px-3 dark:border-white/6"
+			style="border-color: color-mix(in oklab, var(--app-fg) 8%, transparent);"
+		>
+			<div
+				class="min-w-0 flex-1 truncate text-[0.6875rem] font-medium text-gray-600 dark:text-gray-400"
+			>
+				{displayChatTitle}
+			</div>
+			<button
+				bind:this={statusButtonEl}
+				type="button"
+				class="relative flex size-6 shrink-0 items-center justify-center rounded-lg transition-colors duration-75 {statusButtonClass}"
+				aria-label={statusTitle}
+				title={statusTitle}
+				onclick={handleStatusCommand}
+			>
+				<Icon name="list" size={13} />
+			</button>
+		</div>
+	{/if}
+
 	{#if isLanding}
 		<!-- Landing: input + recent chats -->
 		<div class="flex-1 overflow-y-auto flex flex-col">
@@ -1378,6 +1482,7 @@
 					{workspace}
 					placeholder={$t('chat.placeholder', { name: workspaceDisplayName })}
 					onsend={send}
+					onstatus={handleStatusCommand}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
 					onqueueedit={handleQueueEdit}
@@ -1404,7 +1509,12 @@
 				<Spinner size={24} />
 			</div>
 		{:else}
-			<div bind:this={messagesEl} class="flex-1 overflow-y-auto" onscroll={handleMessagesScroll}>
+			<div
+				bind:this={messagesEl}
+				class="flex-1 overflow-y-auto"
+				style="background: var(--app-bg); color: var(--app-fg);"
+				onscroll={handleMessagesScroll}
+			>
 				<div class="max-w-2xl mx-auto px-4 pt-4 pb-16 flex flex-col gap-4">
 					{#if hasHiddenMessages}
 						<div bind:this={loadSentinelEl} class="h-1 w-full" aria-hidden="true"></div>
@@ -1443,14 +1553,14 @@
 		{/if}
 
 		<!-- Input area -->
-		<div class="px-4 py-3">
+		<div class="px-4 py-3" style="background: var(--app-bg);">
 			<div class="max-w-2xl mx-auto relative">
 				{#if !autoScroll && activePath.length > 0}
 					<div
 						class="absolute -top-10 left-0 right-0 pr-2 flex justify-end z-30 pointer-events-none"
 					>
 						<button
-							class="bg-white dark:bg-white/20 border border-gray-200 dark:border-gray-700 p-1 rounded-full pointer-events-auto shadow-sm hover:bg-gray-50 dark:hover:bg-white/30 transition-colors"
+							class="app-surface app-interactive border p-1 rounded-full pointer-events-auto shadow-sm transition-colors"
 							onclick={() => {
 								autoScroll = true;
 								scrollToBottom();
@@ -1484,6 +1594,7 @@
 					oncompact={handleManualCompact}
 					onplan={handlePlanCommand}
 					onstatus={handleStatusCommand}
+					onskillslist={handleSkillsListCommand}
 					oncancel={handleCancel}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
@@ -1496,5 +1607,26 @@
 </div>
 
 {#if showStatusModal}
-	<StatusModal {chatId} {contextUsage} onclose={() => (showStatusModal = false)} />
+	<StatusModal
+		{chatId}
+		{contextUsage}
+		{commandSessions}
+		{queuedMessages}
+		{initialCommandSessionId}
+		anchor={statusButtonEl ?? { x: 0, y: 0 }}
+		onclose={() => {
+			showStatusModal = false;
+			initialCommandSessionId = null;
+		}}
+	/>
+{/if}
+
+{#if showSkillsModal}
+	<SkillsModal
+		skills={skillsModalList}
+		onclose={() => {
+			showSkillsModal = false;
+			skillsModalList = [];
+		}}
+	/>
 {/if}

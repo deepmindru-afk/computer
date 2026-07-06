@@ -18,6 +18,10 @@ SCROLLBACK_SIZE = 64 * 1024  # 64 KB
 IS_WINDOWS = platform.system() == "Windows"
 
 
+class TerminalUnavailable(RuntimeError):
+    """Raised when the platform terminal backend cannot be loaded."""
+
+
 @dataclass
 class TerminalSession:
     """Platform-agnostic terminal session with scrollback buffer."""
@@ -35,6 +39,7 @@ class TerminalSession:
 
     def write(self, data: bytes) -> None:
         if IS_WINDOWS:
+            data = data.decode("utf-8", errors="replace")
             self._process.write(data)  # type: ignore
         else:
             os.write(self._fd, data)
@@ -43,6 +48,8 @@ class TerminalSession:
         try:
             if IS_WINDOWS:
                 data = self._process.read(size)  # type: ignore
+                if isinstance(data, str):
+                    data = data.encode("utf-8", errors="replace")
             else:
                 data = os.read(self._fd, size)
         except (BlockingIOError, OSError):
@@ -191,7 +198,14 @@ def _create_windows(
     session_id: str, shell: str, work_dir: str, env: dict, rows: int, cols: int
 ) -> TerminalSession:
     """Create a terminal session on Windows using pywinpty."""
-    from winpty import PtyProcess  # type: ignore
+    try:
+        from winpty import PtyProcess  # type: ignore
+    except (ImportError, OSError) as exc:
+        raise TerminalUnavailable(
+            "Windows terminal support requires pywinpty and the Microsoft Visual C++ "
+            "Redistributable. Install the latest supported Visual C++ Redistributable "
+            "from Microsoft, then restart cptr."
+        ) from exc
 
     proc = PtyProcess.spawn(
         [shell],

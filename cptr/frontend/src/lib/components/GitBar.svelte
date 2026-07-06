@@ -1,10 +1,12 @@
 <script lang="ts">
-	import { activeWorkspace, openFileTab } from '$lib/stores';
+	import { goto } from '$app/navigation';
+	import { activeWorkspace, addWorkspace, openFileTab } from '$lib/stores';
 	import {
 		getGitLog,
 		getGitDiff,
 		getGitShow,
 		getGitBranches,
+		getGitWorktrees,
 		getGitStatusFresh,
 		getGitStashes,
 		stageFiles,
@@ -19,6 +21,7 @@
 		gitUnstash,
 		checkoutBranch,
 		createGitBranch,
+		createGitWorktree,
 		deleteGitBranch,
 		renameGitBranch
 	} from '$lib/apis/git';
@@ -48,24 +51,47 @@
 		is_remote?: boolean;
 		upstream?: string | null;
 	};
+	type BranchData = {
+		current: string;
+		local: string[];
+		remote: string[];
+		all?: BranchItem[];
+	};
+	type WorktreeItem = {
+		path: string;
+		target_path?: string;
+		branch: string;
+		head: string;
+		is_current?: boolean;
+		is_detached?: boolean;
+		is_bare?: boolean;
+	};
+	type WorktreeData = {
+		repo_root: string;
+		current: string;
+		worktrees: WorktreeItem[];
+	};
 
 	let expanded = $state(false);
 	let view = $state<'changes' | 'history'>('changes');
 	let showDiff = $state(false);
 	let showBranches = $state(false);
+	let showWorktrees = $state(false);
 	let branchBtnEl = $state<HTMLButtonElement | undefined>();
+	let worktreeBtnEl = $state<HTMLButtonElement | undefined>();
 	let branchSearchInputEl = $state<HTMLInputElement | undefined>();
+	let worktreeSearchInputEl = $state<HTMLInputElement | undefined>();
 	let newBranchInputEl = $state<HTMLInputElement | undefined>();
+	let newWorktreeInputEl = $state<HTMLInputElement | undefined>();
 	let commits = $state<Commit[]>([]);
-	let branchData = $state<{
-		current: string;
-		local: string[];
-		remote: string[];
-		all?: BranchItem[];
-	} | null>(null);
+	let branchData = $state<BranchData | null>(null);
+	let worktreeData = $state<WorktreeData | null>(null);
 	let branchSearch = $state('');
+	let worktreeSearch = $state('');
 	let newBranchName = $state('');
+	let newWorktreeBranch = $state('');
 	let creatingBranch = $state(false);
+	let creatingWorktree = $state(false);
 	let pendingCheckoutBranch = $state<string | null>(null);
 	let pendingCreateBranch = $state<string | null>(null);
 	let branchActionMenu = $state<{ branch: BranchItem; anchor: HTMLElement } | null>(null);
@@ -110,20 +136,14 @@
 		if (!query) return branches;
 		return branches.filter((branch) => branch.name.toLowerCase().includes(query));
 	});
-	const branchMenuItems = $derived(
-		filteredBranches.map((branch) => ({
-			label: branch.name,
-			icon: 'git-branch',
-			active: Boolean(branch.is_current),
-			check: true,
-			onclick: () => switchBranch(branch.name),
-			actionIcon: 'three-dots',
-			actionLabel: 'Branch actions',
-			actionOnclick: (anchor: HTMLElement) => {
-				branchActionMenu = { branch, anchor };
-			}
-		}))
-	);
+	const filteredWorktrees = $derived.by(() => {
+		const worktrees = worktreeData?.worktrees ?? [];
+		const query = worktreeSearch.trim().toLowerCase();
+		if (!query) return worktrees;
+		return worktrees.filter((worktree) =>
+			`${worktreeLabel(worktree)} ${worktree.path}`.toLowerCase().includes(query)
+		);
+	});
 
 	// Convert git remote URL to browser URL
 	const remoteWebUrl = $derived.by(() => {
@@ -224,7 +244,15 @@
 		try {
 			branchData = await getGitBranches(workspacePath);
 		} catch {
-			branchData = null;
+			branchData = { current: '', local: [], remote: [], all: [] };
+		}
+	}
+
+	async function loadWorktrees() {
+		try {
+			worktreeData = await getGitWorktrees(workspacePath);
+		} catch {
+			worktreeData = { repo_root: '', current: '', worktrees: [] };
 		}
 	}
 
@@ -235,11 +263,29 @@
 			return;
 		}
 		showBranches = true;
+		showWorktrees = false;
 		branchSearch = '';
 		creatingBranch = false;
 		newBranchName = '';
+		branchData = null;
 		await loadBranches();
 		setTimeout(() => branchSearchInputEl?.focus(), 0);
+	}
+
+	async function toggleWorktrees(e: MouseEvent) {
+		e.stopPropagation();
+		if (showWorktrees) {
+			showWorktrees = false;
+			return;
+		}
+		showWorktrees = true;
+		showBranches = false;
+		worktreeSearch = '';
+		creatingWorktree = false;
+		newWorktreeBranch = '';
+		worktreeData = null;
+		await loadWorktrees();
+		setTimeout(() => worktreeSearchInputEl?.focus(), 0);
 	}
 
 	function switchView(v: 'changes' | 'history') {
@@ -303,7 +349,7 @@
 			flash($t('git.uncommitted'));
 			switchView('changes');
 		} catch (e) {
-			flash(e instanceof Error ? e.message : 'Failed to undo commit');
+			flash(e instanceof Error ? e.message : $t('git.uncommitFailed'));
 		}
 		loading = false;
 		await refresh();
@@ -328,6 +374,7 @@
 			loading = false;
 			await refresh({ force: true });
 			if (showBranches) await loadBranches();
+			if (showWorktrees) await loadWorktrees();
 			if (view === 'history') await loadHistory();
 		}
 	}
@@ -354,6 +401,19 @@
 			return;
 		}
 		await performBranchCheckout(branch, 'bring');
+	}
+
+	async function switchWorktree(worktree: WorktreeItem) {
+		if (worktree.is_current) {
+			showWorktrees = false;
+			return;
+		}
+		const target = worktree.target_path || worktree.path;
+		addWorkspace(target);
+		showWorktrees = false;
+		creatingWorktree = false;
+		newWorktreeBranch = '';
+		await goto(`/?workspace=${encodeURIComponent(target)}`);
 	}
 
 	async function restoreStashedChangesForBranch(branch: string) {
@@ -389,7 +449,7 @@
 					message?: string;
 				};
 				if (!stashResult.ok) {
-					flash(stashResult.message || 'No changes stashed');
+					flash(stashResult.message || $t('git.noChangesStashed'));
 					return;
 				}
 			}
@@ -397,7 +457,7 @@
 			pendingCheckoutBranch = null;
 			await restoreStashedChangesForBranch(branch);
 		} catch (e) {
-			flash(e instanceof Error ? e.message : 'Failed to switch branch');
+			flash(e instanceof Error ? e.message : $t('git.switchBranchFailed'));
 		} finally {
 			loading = false;
 			await refresh();
@@ -416,6 +476,29 @@
 		await performBranchCreate(branch, 'bring');
 	}
 
+	async function createWorktree() {
+		if (!newWorktreeBranch.trim()) return;
+		const branch = newWorktreeBranch.trim();
+		loading = true;
+		try {
+			const result = (await createGitWorktree(workspacePath, branch)) as { path?: string };
+			const target = result.path;
+			newWorktreeBranch = '';
+			creatingWorktree = false;
+			if (target) {
+				addWorkspace(target);
+				showWorktrees = false;
+				await goto(`/?workspace=${encodeURIComponent(target)}`);
+			} else {
+				await loadWorktrees();
+			}
+		} catch (e) {
+			flash(e instanceof Error ? e.message : $t('git.createWorktreeFailed'));
+		} finally {
+			loading = false;
+		}
+	}
+
 	async function performBranchCreate(branch: string, changeMode: 'bring' | 'leave') {
 		loading = true;
 		try {
@@ -429,7 +512,7 @@
 					message?: string;
 				};
 				if (!stashResult.ok) {
-					flash(stashResult.message || 'No changes stashed');
+					flash(stashResult.message || $t('git.noChangesStashed'));
 					return;
 				}
 			}
@@ -439,7 +522,7 @@
 			showBranches = false;
 			pendingCreateBranch = null;
 		} catch (e) {
-			flash(e instanceof Error ? e.message : 'Failed to create branch');
+			flash(e instanceof Error ? e.message : $t('git.createBranchFailed'));
 		} finally {
 			loading = false;
 			await refresh();
@@ -481,36 +564,36 @@
 
 	async function renameBranch(branch: BranchItem) {
 		if (!branch.is_local) return;
-		const nextName = window.prompt('Rename branch', branch.name)?.trim();
+		const nextName = window.prompt($t('git.renameBranch'), branch.name)?.trim();
 		if (!nextName || nextName === branch.name) return;
 		try {
 			await renameGitBranch(workspacePath, branch.name, nextName);
-			flash('Branch renamed');
+			flash($t('git.branchRenamed'));
 			closeBranchActionMenu();
 			await refresh({ force: true });
 			await loadBranches();
 		} catch (e) {
-			flash(e instanceof Error ? e.message : 'Failed to rename branch');
+			flash(e instanceof Error ? e.message : $t('git.renameBranchFailed'));
 		}
 	}
 
 	function copyBranchName(branch: BranchItem) {
 		navigator.clipboard.writeText(branch.name);
-		flash('Branch name copied');
+		flash($t('git.branchNameCopied'));
 		closeBranchActionMenu();
 	}
 
 	async function deleteBranch(branch: BranchItem) {
 		if (!branch.is_local || branch.is_current) return;
-		if (!confirm(`Delete branch "${branch.name}"?`)) return;
+		if (!confirm($t('git.deleteBranchConfirm', { name: branch.name }))) return;
 		try {
 			await deleteGitBranch(workspacePath, branch.name);
-			flash('Branch deleted');
+			flash($t('git.branchDeleted'));
 			closeBranchActionMenu();
 			await refresh({ force: true });
 			await loadBranches();
 		} catch (e) {
-			flash(e instanceof Error ? e.message : 'Failed to delete branch');
+			flash(e instanceof Error ? e.message : $t('git.deleteBranchFailed'));
 		}
 	}
 
@@ -539,6 +622,14 @@
 	function fPath(p: string): { dir: string; name: string } {
 		const i = p.lastIndexOf('/');
 		return i >= 0 ? { dir: p.slice(0, i + 1), name: p.slice(i + 1) } : { dir: '', name: p };
+	}
+
+	function pathTail(path: string): string {
+		return path.split(/[\\/]/).filter(Boolean).pop() || path;
+	}
+
+	function worktreeLabel(worktree: WorktreeItem): string {
+		return worktree.branch || (worktree.is_detached ? 'Detached' : 'Worktree');
 	}
 
 	function relTime(d: string) {
@@ -637,7 +728,7 @@
 	function blockClass(type: string): string {
 		switch (type) {
 			case 'added':
-				return 'bg-green-100 border-l-[3px] border-l-green-500 dark:bg-green-500/15 dark:border-l-green-400';
+				return 'bg-green-100 border-l-[0.1875rem] border-l-green-500 dark:bg-green-500/15 dark:border-l-green-400';
 			case 'removed':
 				return 'bg-red-100 diff-gutter-removed dark:bg-red-500/15';
 			default:
@@ -689,25 +780,38 @@
 				onclick={toggleBranches}
 			>
 				<Icon name="git-branch" size={12} class="text-gray-400 dark:text-gray-600 shrink-0" />
-				<span class="text-[11px] text-gray-600 dark:text-gray-400 font-mono"
+				<span class="text-[0.6875rem] text-gray-600 dark:text-gray-400 font-mono"
 					>{gitStatus.branch}</span
 				>
 				<Icon name="chevron-down" size={9} class="text-gray-400 dark:text-gray-600" />
 			</button>
 
+			<button
+				bind:this={worktreeBtnEl}
+				class="flex items-center gap-1.5 h-6 px-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-white/6 transition-colors duration-75"
+				onclick={toggleWorktrees}
+			>
+				<Icon name="folder" size={12} class="text-gray-400 dark:text-gray-600 shrink-0" />
+				<span class="text-[0.6875rem] text-gray-500 dark:text-gray-500 font-mono"
+					>{pathTail(workspacePath)}</span
+				>
+				<Icon name="chevron-down" size={9} class="text-gray-400 dark:text-gray-600" />
+			</button>
+
 			{#if gitStatus.ahead > 0}<span
-					class="text-[10px] font-mono text-gray-400 dark:text-gray-600 ml-1.5"
+					class="text-[0.625rem] font-mono text-gray-400 dark:text-gray-600 ml-1.5"
 					>↑{gitStatus.ahead}</span
 				>{/if}
 			{#if gitStatus.behind > 0}<span
-					class="text-[10px] font-mono text-gray-400 dark:text-gray-600 ml-1"
+					class="text-[0.625rem] font-mono text-gray-400 dark:text-gray-600 ml-1"
 					>↓{gitStatus.behind}</span
 				>{/if}
 			{#if totalChanges > 0}<span
-					class="text-[10px] font-mono text-gray-400 dark:text-gray-600 ml-1.5"
+					class="text-[0.625rem] font-mono text-gray-400 dark:text-gray-600 ml-1.5"
 					>{$t('git.changedCount', { count: totalChanges })}</span
 				>{/if}
-			{#if actionMsg}<span class="text-[10px] font-mono text-gray-400 dark:text-gray-600 ml-auto"
+			{#if actionMsg}<span
+					class="text-[0.625rem] font-mono text-gray-400 dark:text-gray-600 ml-auto"
 					>{actionMsg}</span
 				>{/if}
 
@@ -715,7 +819,7 @@
 
 			<!-- Sync button (stops expand) -->
 			<button
-				class="flex items-center gap-1 h-6 px-2 rounded-md text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors duration-75"
+				class="flex items-center gap-1 h-6 px-2 rounded-md text-[0.6875rem] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors duration-75"
 				onclick={(e) => {
 					e.stopPropagation();
 					syncAction.action();
@@ -738,7 +842,7 @@
 		<!-- Branch picker dropdown -->
 		{#if showBranches && branchBtnEl}
 			<DropdownMenu
-				items={branchMenuItems}
+				items={[]}
 				anchor={branchBtnEl}
 				onclose={() => {
 					showBranches = false;
@@ -760,8 +864,8 @@
 							<input
 								bind:this={branchSearchInputEl}
 								bind:value={branchSearch}
-								placeholder="Search branches"
-								class="w-full bg-transparent text-[11px] text-gray-500 dark:text-gray-400 placeholder:text-gray-300 dark:placeholder:text-gray-600 outline-none"
+								placeholder={$t('search.search')}
+								class="w-full bg-transparent text-[0.6875rem] text-gray-500 dark:text-gray-400 placeholder:text-gray-300 dark:placeholder:text-gray-600 outline-none"
 								onkeydown={(e) => {
 									if (e.key === 'Escape') showBranches = false;
 								}}
@@ -774,10 +878,63 @@
 						{/if}
 					</div>
 				{/snippet}
-				{#snippet empty()}
+				{#snippet children()}
 					{#if branchData}
-						<div class="px-3 py-2 text-[11px] text-gray-400 dark:text-gray-500 text-center">
-							No branches found
+						{#if filteredBranches.length > 0}
+							<div
+								class="px-2 pt-1 pb-0.5 text-[0.625rem] uppercase text-gray-300 dark:text-gray-600"
+							>
+								{$t('git.branches')}
+							</div>
+							{#each filteredBranches as branch (branch.name)}
+								<div
+									class="group flex items-center gap-1 w-full h-6 rounded-xl text-xs transition-colors duration-75
+										{branch.is_current
+										? 'text-gray-900 dark:text-white bg-gray-50 dark:bg-white/5'
+										: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}"
+								>
+									<button
+										class="flex items-center gap-2 min-w-0 flex-1 h-full px-2 text-inherit"
+										onclick={() => switchBranch(branch.name)}
+									>
+										<Icon name="git-branch" size={14} />
+										<span class="flex-1 text-left truncate">{branch.name}</span>
+										{#if branch.is_current}
+											<svg
+												class="w-3 h-3 shrink-0 text-gray-400 dark:text-gray-500"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2.5"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+											>
+												<polyline points="20 6 9 17 4 12" />
+											</svg>
+										{/if}
+									</button>
+									<button
+										class="flex items-center justify-center w-5 h-5 mr-0.5 rounded-lg shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-all duration-75"
+										aria-label={$t('git.branchActions')}
+										onclick={(e) => {
+											e.stopPropagation();
+											branchActionMenu = { branch, anchor: e.currentTarget as HTMLElement };
+										}}
+									>
+										<Icon name="three-dots" size={12} />
+									</button>
+								</div>
+							{/each}
+						{/if}
+
+						{#if filteredBranches.length === 0}
+							<div class="px-3 py-2 text-[0.6875rem] text-gray-400 dark:text-gray-500 text-center">
+								{$t('git.noBranchesFound')}
+							</div>
+						{/if}
+					{:else if branchData}
+						<div class="px-3 py-2 text-[0.6875rem] text-gray-400 dark:text-gray-500 text-center">
+							{$t('git.noBranchesFound')}
 						</div>
 					{/if}
 				{/snippet}
@@ -824,7 +981,143 @@
 							}}
 						>
 							<Icon name="plus" size={14} />
-							<span class="truncate">New branch</span>
+							<span class="truncate">{$t('git.newBranch')}</span>
+						</button>
+					{/if}
+				{/snippet}
+			</DropdownMenu>
+		{/if}
+
+		<!-- Worktree picker dropdown -->
+		{#if showWorktrees && worktreeBtnEl}
+			<DropdownMenu
+				items={[]}
+				anchor={worktreeBtnEl}
+				onclose={() => {
+					showWorktrees = false;
+					creatingWorktree = false;
+					newWorktreeBranch = '';
+				}}
+				preferAbove
+				forceAbove
+				maxHeight="15rem"
+				className="w-60"
+				align="start"
+				headerDivider={false}
+				footerDivider={false}
+			>
+				{#snippet header()}
+					<div class="px-2 pb-0.5">
+						<div class="flex items-center gap-1.5 h-6 mt-0.5">
+							<Icon name="search" size={13} class="shrink-0 text-gray-300 dark:text-gray-600" />
+							<input
+								bind:this={worktreeSearchInputEl}
+								bind:value={worktreeSearch}
+								placeholder={$t('git.searchWorktrees')}
+								class="w-full bg-transparent text-[0.6875rem] text-gray-500 dark:text-gray-400 placeholder:text-gray-300 dark:placeholder:text-gray-600 outline-none"
+								onkeydown={(e) => {
+									if (e.key === 'Escape') showWorktrees = false;
+								}}
+							/>
+						</div>
+						{#if !worktreeData}
+							<div class="flex items-center justify-center h-10">
+								<Spinner size={14} />
+							</div>
+						{/if}
+					</div>
+				{/snippet}
+				{#snippet children()}
+					{#if worktreeData}
+						{#if filteredWorktrees.length > 0}
+							<div
+								class="px-2 pt-1 pb-0.5 text-[0.625rem] uppercase text-gray-300 dark:text-gray-600"
+							>
+								{$t('git.worktrees')}
+							</div>
+							{#each filteredWorktrees as worktree (worktree.path)}
+								<button
+									type="button"
+									class="group flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs transition-colors duration-75
+										{worktree.is_current
+										? 'text-gray-900 dark:text-white bg-gray-50 dark:bg-white/5'
+										: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}"
+									onclick={() => switchWorktree(worktree)}
+								>
+									<Icon name="folder" size={14} class="shrink-0" />
+									<span class="min-w-0 flex-1 text-left truncate">{worktreeLabel(worktree)}</span>
+									<span
+										class="min-w-0 max-w-[45%] truncate text-[0.6875rem] text-gray-300 dark:text-gray-600"
+									>
+										{pathTail(worktree.path)}
+									</span>
+									{#if worktree.is_current}
+										<svg
+											class="w-3 h-3 shrink-0 text-gray-400 dark:text-gray-500"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2.5"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+										>
+											<polyline points="20 6 9 17 4 12" />
+										</svg>
+									{/if}
+								</button>
+							{/each}
+						{:else}
+							<div class="px-3 py-2 text-[0.6875rem] text-gray-400 dark:text-gray-500 text-center">
+								{$t('git.noWorktreesFound')}
+							</div>
+						{/if}
+					{/if}
+				{/snippet}
+				{#snippet footer()}
+					{#if creatingWorktree}
+						<div class="flex items-center gap-2 h-7 px-2">
+							<Icon name="folder" size={14} class="text-gray-400 shrink-0" />
+							<input
+								bind:this={newWorktreeInputEl}
+								type="text"
+								class="flex-1 border-none outline-none bg-transparent text-xs text-gray-900 dark:text-white placeholder:text-gray-400"
+								placeholder={$t('git.branchName')}
+								bind:value={newWorktreeBranch}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') createWorktree();
+									if (e.key === 'Escape') {
+										creatingWorktree = false;
+										newWorktreeBranch = '';
+									}
+								}}
+							/>
+							<button
+								class="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors duration-75"
+								onclick={() => {
+									creatingWorktree = false;
+									newWorktreeBranch = '';
+								}}
+							>
+								<Icon name="xmark" size={12} />
+							</button>
+							<button
+								class="flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors duration-75"
+								onclick={createWorktree}
+								disabled={loading}
+							>
+								<Icon name="check" size={12} />
+							</button>
+						</div>
+					{:else}
+						<button
+							class="flex items-center gap-2 w-full h-7 px-2 rounded-xl text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white transition-colors"
+							onclick={() => {
+								creatingWorktree = true;
+								setTimeout(() => newWorktreeInputEl?.focus(), 0);
+							}}
+						>
+							<Icon name="plus" size={14} />
+							<span class="truncate">{$t('git.newWorktree')}</span>
 						</button>
 					{/if}
 				{/snippet}
@@ -840,7 +1133,7 @@
 					<!-- Mobile back button when viewing diff -->
 					{#if showDiff}
 						<button
-							class="flex md:hidden items-center gap-1 h-6 px-1.5 rounded-md text-[11px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+							class="flex md:hidden items-center gap-1 h-6 px-1.5 rounded-md text-[0.6875rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
 							onclick={backToList}
 						>
 							<Icon name="chevron-left" size={12} />
@@ -849,7 +1142,7 @@
 
 					<!-- Tabs (always visible) -->
 					<button
-						class="px-2.5 h-6 rounded-md text-[11px] font-medium transition-colors duration-75
+						class="px-2.5 h-6 rounded-md text-[0.6875rem] font-medium transition-colors duration-75
 							{view === 'changes'
 							? 'bg-gray-200/50 dark:bg-white/8 text-gray-900 dark:text-white'
 							: 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}"
@@ -859,7 +1152,7 @@
 							>{/if}</button
 					>
 					<button
-						class="px-2.5 h-6 rounded-md text-[11px] font-medium transition-colors duration-75
+						class="px-2.5 h-6 rounded-md text-[0.6875rem] font-medium transition-colors duration-75
 							{view === 'history'
 							? 'bg-gray-200/50 dark:bg-white/8 text-gray-900 dark:text-white'
 							: 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}"
@@ -921,7 +1214,7 @@
 											/>
 										{/if}
 									</span>
-									<span class="text-[11px] text-gray-600 dark:text-gray-400"
+									<span class="text-[0.6875rem] text-gray-600 dark:text-gray-400"
 										>{$t('git.changedFile', { count: totalChanges })}</span
 									>
 								</button>
@@ -956,19 +1249,19 @@
 										</span>
 										{#if fp.dir}
 											<span
-												class="text-[10px] text-gray-400 dark:text-gray-600 truncate shrink min-w-0"
+												class="text-[0.625rem] text-gray-400 dark:text-gray-600 truncate shrink min-w-0"
 												>{fp.dir}</span
 											>
 										{/if}
 										<!-- svelte-ignore a11y_no_static_element_interactions -->
 										<span
-											class="text-[11px] text-gray-800 dark:text-gray-200 truncate shrink-0 hover:underline cursor-pointer"
+											class="text-[0.6875rem] text-gray-800 dark:text-gray-200 truncate shrink-0 hover:underline cursor-pointer"
 											onclick={(e) => {
 												e.stopPropagation();
 												openFileTab(workspacePath.replace(/\/$/, '') + '/' + file.path);
 											}}>{fp.name}</span
 										>
-										<span class="ml-auto text-[10px] font-mono font-bold shrink-0 {sc.color}"
+										<span class="ml-auto text-[0.625rem] font-mono font-bold shrink-0 {sc.color}"
 											>{sc.char}</span
 										>
 										<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -992,7 +1285,7 @@
 								>
 									<input
 										type="text"
-										class="w-full h-7 px-2 bg-transparent text-[11px] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none"
+										class="w-full h-7 px-2 bg-transparent text-[0.6875rem] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none"
 										placeholder={$t('git.summaryRequired')}
 										bind:value={commitSummary}
 										onkeydown={(e) => {
@@ -1000,14 +1293,14 @@
 										}}
 									/>
 									<textarea
-										class="w-full px-2 py-1.5 bg-transparent text-[11px] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none resize-none border-t border-gray-100 dark:border-white/4"
+										class="w-full px-2 py-1.5 bg-transparent text-[0.6875rem] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none resize-none border-t border-gray-100 dark:border-white/4"
 										rows="2"
 										placeholder={$t('git.description')}
 										bind:value={commitDescription}
 									></textarea>
 								</div>
 								<button
-									class="w-full h-7 mt-1.5 rounded-lg text-[11px] font-medium transition-colors duration-75
+									class="w-full h-7 mt-1.5 rounded-lg text-[0.6875rem] font-medium transition-colors duration-75
 										{stagedFiles.length && commitSummary.trim()
 										? 'bg-gray-900 dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200'
 										: 'bg-gray-100 dark:bg-white/6 text-gray-400 dark:text-gray-600 cursor-default'}"
@@ -1037,8 +1330,8 @@
 												size={10}
 												class="text-gray-400 dark:text-gray-600 shrink-0"
 											/>
-											<span class="text-[10px] text-gray-400 dark:text-gray-600">
-												{unpushedCount} unpushed {unpushedCount === 1 ? 'commit' : 'commits'}
+											<span class="text-[0.625rem] text-gray-400 dark:text-gray-600">
+												{$t('git.unpushedCommit', { count: unpushedCount })}
 											</span>
 										</div>
 									{/if}
@@ -1052,14 +1345,14 @@
 										{#if i < unpushedCount}
 											<span
 												class="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 shrink-0"
-												title="Unpushed"
+												title={$t('git.unpushed')}
 											></span>
 										{/if}
 										<div class="flex flex-col min-w-0 flex-1">
 											<span class="text-xs text-gray-800 dark:text-gray-200 truncate w-full"
 												>{c.message}</span
 											>
-											<span class="text-[10px] text-gray-400 dark:text-gray-600 font-mono"
+											<span class="text-[0.625rem] text-gray-400 dark:text-gray-600 font-mono"
 												>{c.short_hash} · {c.author} · {relTime(c.date)}</span
 											>
 										</div>
@@ -1077,7 +1370,7 @@
 								{/each}
 								{#if !commits.length}
 									<div
-										class="flex items-center justify-center h-full text-[11px] text-gray-400 dark:text-gray-600"
+										class="flex items-center justify-center h-full text-[0.6875rem] text-gray-400 dark:text-gray-600"
 									>
 										{$t('git.noCommits')}
 									</div>
@@ -1088,14 +1381,14 @@
 
 					<!-- Right pane: diff viewer -->
 					<div
-						class="flex-1 overflow-hidden font-mono text-[11px] leading-[18px]
+						class="flex-1 overflow-hidden font-mono text-[0.6875rem] leading-[1.125rem]
 						{showDiff ? 'flex flex-col' : 'hidden md:flex md:flex-col'}"
 					>
 						{#if fileDiff.length}
 							<div
 								class="hidden md:flex items-center h-6 px-2 border-b border-gray-100 dark:border-white/4 shrink-0"
 							>
-								<span class="text-[10px] text-gray-400 dark:text-gray-600 font-mono truncate">
+								<span class="text-[0.625rem] text-gray-400 dark:text-gray-600 font-mono truncate">
 									{#if selectedCommit}
 										{selectedCommit.short_hash} · {selectedCommit.message}
 									{:else}
@@ -1108,7 +1401,7 @@
 									{#each fileDiff as df}
 										{#if fileDiff.length > 1}
 											<div
-												class="px-2 py-1 text-[10px] text-gray-500 dark:text-gray-400 bg-white dark:bg-[#1a1a1a] border-b border-gray-100 dark:border-white/4 sticky top-0 z-10 font-medium"
+												class="px-2 py-1 text-[0.625rem] text-gray-500 dark:text-gray-400 bg-white dark:bg-[#1a1a1a] border-b border-gray-100 dark:border-white/4 sticky top-0 z-10 font-medium"
 											>
 												{df.path}
 											</div>
@@ -1152,15 +1445,15 @@
 						{:else}
 							<div class="flex items-center justify-center h-full">
 								{#if view === 'history' && !selectedCommit}
-									<span class="text-[11px] text-gray-400 dark:text-gray-600"
+									<span class="text-[0.6875rem] text-gray-400 dark:text-gray-600"
 										>{$t('git.selectCommit')}</span
 									>
 								{:else if totalChanges}
-									<span class="text-[11px] text-gray-400 dark:text-gray-600"
+									<span class="text-[0.6875rem] text-gray-400 dark:text-gray-600"
 										>{$t('git.selectFile')}</span
 									>
 								{:else}
-									<span class="text-[11px] text-gray-400 dark:text-gray-600 font-sans"
+									<span class="text-[0.6875rem] text-gray-400 dark:text-gray-600 font-sans"
 										>{$t('git.noLocalChanges')}</span
 									>
 								{/if}
@@ -1176,11 +1469,11 @@
 {#if pendingCheckoutBranch}
 	<Modal onclose={() => (pendingCheckoutBranch = null)} class="w-full max-w-sm mx-4">
 		<div class="p-4">
-			<h2 class="text-sm font-medium text-gray-900 dark:text-white">Switch branches?</h2>
+			<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$t('git.switchBranches')}</h2>
 			<p class="mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-				You have {totalChanges} changed {totalChanges === 1 ? 'file' : 'files'} on
-				<span class="font-mono text-gray-700 dark:text-gray-300">{gitStatus?.branch}</span>. Choose
-				whether to leave those changes here or bring them to
+				{$t('git.moveChangesPromptPrefix', { count: totalChanges })}
+				<span class="font-mono text-gray-700 dark:text-gray-300">{gitStatus?.branch}</span>.
+				{$t('git.moveChangesPromptMiddle')}
 				<span class="font-mono text-gray-700 dark:text-gray-300">{pendingCheckoutBranch}</span>.
 			</p>
 			<div class="mt-4 flex items-center justify-end gap-2">
@@ -1188,21 +1481,21 @@
 					class="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
 					onclick={() => (pendingCheckoutBranch = null)}
 				>
-					Cancel
+					{$t('common.cancel')}
 				</button>
 				<button
 					class="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
 					onclick={() => performBranchCheckout(pendingCheckoutBranch!, 'leave')}
 					disabled={loading}
 				>
-					Leave changes
+					{$t('git.leaveChanges')}
 				</button>
 				<button
 					class="px-3.5 py-1.5 text-xs bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-colors rounded-full disabled:opacity-50"
 					onclick={() => performBranchCheckout(pendingCheckoutBranch!, 'bring')}
 					disabled={loading}
 				>
-					Bring changes
+					{$t('git.bringChanges')}
 				</button>
 			</div>
 		</div>
@@ -1212,11 +1505,13 @@
 {#if pendingCreateBranch}
 	<Modal onclose={() => (pendingCreateBranch = null)} class="w-full max-w-sm mx-4">
 		<div class="p-4">
-			<h2 class="text-sm font-medium text-gray-900 dark:text-white">Create branch?</h2>
+			<h2 class="text-sm font-medium text-gray-900 dark:text-white">
+				{$t('git.createBranchPrompt')}
+			</h2>
 			<p class="mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-				You have {totalChanges} changed {totalChanges === 1 ? 'file' : 'files'} on
-				<span class="font-mono text-gray-700 dark:text-gray-300">{gitStatus?.branch}</span>. Choose
-				whether to leave those changes here or bring them to
+				{$t('git.moveChangesPromptPrefix', { count: totalChanges })}
+				<span class="font-mono text-gray-700 dark:text-gray-300">{gitStatus?.branch}</span>.
+				{$t('git.moveChangesPromptMiddle')}
 				<span class="font-mono text-gray-700 dark:text-gray-300">{pendingCreateBranch}</span>.
 			</p>
 			<div class="mt-4 flex items-center justify-end gap-2">
@@ -1224,21 +1519,21 @@
 					class="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
 					onclick={() => (pendingCreateBranch = null)}
 				>
-					Cancel
+					{$t('common.cancel')}
 				</button>
 				<button
 					class="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
 					onclick={() => performBranchCreate(pendingCreateBranch!, 'leave')}
 					disabled={loading}
 				>
-					Leave changes
+					{$t('git.leaveChanges')}
 				</button>
 				<button
 					class="px-3.5 py-1.5 text-xs bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-colors rounded-full disabled:opacity-50"
 					onclick={() => performBranchCreate(pendingCreateBranch!, 'bring')}
 					disabled={loading}
 				>
-					Bring changes
+					{$t('git.bringChanges')}
 				</button>
 			</div>
 		</div>
@@ -1252,21 +1547,21 @@
 			...(branchActionMenu.branch.is_local
 				? [
 						{
-							label: 'Rename',
+							label: $t('files.rename'),
 							icon: 'pencil',
 							onclick: () => renameBranch(branchActionMenu!.branch)
 						}
 					]
 				: []),
 			{
-				label: 'Copy branch name',
+				label: $t('git.copyBranchName'),
 				icon: 'copy',
 				onclick: () => copyBranchName(branchActionMenu!.branch)
 			},
 			...(branchActionMenu.branch.is_local && !branchActionMenu.branch.is_current
 				? [
 						{
-							label: 'Delete',
+							label: $t('files.delete'),
 							icon: 'xmark',
 							onclick: () => deleteBranch(branchActionMenu!.branch)
 						}
@@ -1338,23 +1633,23 @@
 	}
 
 	.diff-gutter-removed {
-		border-left: 3px solid transparent;
+		border-left: 0.1875rem solid transparent;
 		border-image: repeating-linear-gradient(
 				-45deg,
 				#ef4444 0,
 				#ef4444 1px,
 				transparent 1px,
-				transparent 3px
+				transparent 0.1875rem
 			)
 			3;
 	}
 
 	.git-resize-handle {
 		position: absolute;
-		top: -3px;
+		top: -0.1875rem;
 		left: 0;
 		right: 0;
-		height: 6px;
+		height: 0.375rem;
 		cursor: row-resize;
 		z-index: 10;
 		transition: background 0.15s;

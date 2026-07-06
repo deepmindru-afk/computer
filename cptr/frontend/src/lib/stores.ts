@@ -30,6 +30,15 @@ import { streamingChatTabs } from '$lib/stores/chat';
 import { keybindings, loadKeybindings } from '$lib/stores/keybindings';
 import { defaultPwaPreferences, type PwaPreferences } from '$lib/intents/types';
 import { getPathDisplayName, isSupportedWorkspacePath } from '$lib/utils/paths';
+import {
+	applyAppearance,
+	sanitizeThemeConfig,
+	type AppearancePreferences,
+	type Theme,
+	type ThemeConfig
+} from '$lib/utils/appearance';
+
+export type { AppearancePreferences, Theme, ThemeConfig };
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -69,7 +78,8 @@ export interface WorkspaceState {
 export type ToolApprovalMode = 'ask' | 'auto' | 'full';
 
 export interface UserPreferences {
-	theme: Theme;
+	theme?: Theme;
+	appearance?: AppearancePreferences;
 	sidebarOpen: boolean;
 	sidebarWidth: number;
 	toolApprovalMode: ToolApprovalMode;
@@ -82,9 +92,8 @@ export interface UserPreferences {
 	requestParams?: Record<string, unknown>; // arbitrary params merged into API request body
 	showUpdateToast?: boolean; // show version update notifications (default true)
 	pwa?: PwaPreferences;
+	textScale?: number | null;
 }
-
-export type Theme = 'dark' | 'light' | 'system';
 
 // ── ID generation ───────────────────────────────────────────────
 
@@ -172,6 +181,8 @@ export type StreamingBehavior = 'queue' | 'interrupt';
 export const streamingBehavior = writable<StreamingBehavior>('queue');
 export const selectedModelId = writable<string>('');
 export const pwaPreferences = writable<PwaPreferences>(defaultPwaPreferences);
+export const themeConfig = writable<ThemeConfig | null>(null);
+export const textScale = writable<number | null>(null);
 
 /** Saved workspace path order for sidebar drag-reorder. */
 export const workspaceOrder = writable<string[]>([]);
@@ -202,50 +213,6 @@ export const splitTab = derived(currentWorkspace, ($ws) => {
 	const secondGroup = $ws.groups.find((g) => g.id !== $ws.activeGroupId) ?? $ws.groups[1];
 	return secondGroup?.tabs.find((t) => t.id === secondGroup.activeTabId) ?? null;
 });
-
-/** @deprecated Use splitCurrentTab or openInGroup */
-export function openTabInSplit(tabId: string, direction?: SplitDirection): void {
-	const ws = get(currentWorkspace);
-	if (!ws) return;
-
-	// If already split, move tab to the other group
-	if (ws.groups.length > 1) {
-		const otherGroup = ws.groups.find((g) => g.id !== ws.activeGroupId);
-		if (otherGroup) {
-			moveTabToGroup(tabId, ws.activeGroupId, otherGroup.id);
-			return;
-		}
-	}
-
-	// Otherwise, create a new group with this tab
-	const dir = direction ?? ws.splitDirection ?? 'horizontal';
-
-	// Find the tab in any group
-	let sourceTab: Tab | undefined;
-	for (const g of ws.groups) {
-		sourceTab = g.tabs.find((t) => t.id === tabId);
-		if (sourceTab) break;
-	}
-	if (!sourceTab) return;
-
-	const newTab: Tab = { ...sourceTab, id: nextId(), permanent: false };
-	const newGroup: EditorGroup = {
-		id: nextId(),
-		tabs: [newTab],
-		activeTabId: newTab.id
-	};
-
-	currentWorkspace.update((ws) => {
-		if (!ws) return ws;
-		return {
-			...ws,
-			groups: [...ws.groups, newGroup],
-			activeGroupId: newGroup.id,
-			splitDirection: dir,
-			splitRatio: ws.splitRatio ?? 0.5
-		};
-	});
-}
 
 /** @deprecated Use closeGroup */
 export function closeSplitPane(): void {
@@ -297,6 +264,11 @@ function persistPreferences(): void {
 	_savePrefTimer = setTimeout(() => {
 		const prefs: UserPreferences = {
 			theme: get(theme),
+			appearance: {
+				theme: get(theme),
+				themeConfig: sanitizeThemeConfig(get(themeConfig)),
+				textScale: get(textScale) ?? undefined
+			},
 			sidebarOpen: get(sidebarOpen),
 			sidebarWidth: get(sidebarWidth),
 			toolApprovalMode: get(toolApprovalMode),
@@ -308,7 +280,8 @@ function persistPreferences(): void {
 			selectedModelId: get(selectedModelId) || undefined,
 			requestParams: Object.keys(get(requestParams)).length ? get(requestParams) : undefined,
 			showUpdateToast: get(showUpdateToastPref),
-			pwa: get(pwaPreferences)
+			pwa: get(pwaPreferences),
+			textScale: get(textScale) ?? undefined
 		};
 		savePreferences(prefs as unknown as Record<string, unknown>).catch(() => {});
 	}, 300);
@@ -322,6 +295,9 @@ function subscribeForPersistence() {
 		if (get(stateLoaded)) persistWorkspace();
 	});
 	theme.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
+	themeConfig.subscribe(() => {
 		if (get(stateLoaded)) persistPreferences();
 	});
 	sidebarOpen.subscribe(() => {
@@ -357,6 +333,9 @@ function subscribeForPersistence() {
 	pwaPreferences.subscribe(() => {
 		if (get(stateLoaded)) persistPreferences();
 	});
+	textScale.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
+	});
 	i18next.on('languageChanged', () => {
 		if (get(stateLoaded)) persistPreferences();
 	});
@@ -367,7 +346,11 @@ function subscribeForPersistence() {
 export async function loadPreferences(): Promise<void> {
 	try {
 		const prefs = await getPreferences();
-		if (prefs.theme) theme.set(prefs.theme as Theme);
+		const appearance = (
+			prefs.appearance && typeof prefs.appearance === 'object' ? prefs.appearance : {}
+		) as AppearancePreferences;
+		if (appearance.theme || prefs.theme) theme.set((appearance.theme ?? prefs.theme) as Theme);
+		themeConfig.set(sanitizeThemeConfig(appearance.themeConfig));
 		if (prefs.sidebarOpen !== undefined) sidebarOpen.set(prefs.sidebarOpen as boolean);
 		if (prefs.sidebarWidth !== undefined) sidebarWidth.set(prefs.sidebarWidth as number);
 		// Support new toolApprovalMode and legacy boolean autoApproveTools
@@ -386,6 +369,13 @@ export async function loadPreferences(): Promise<void> {
 		if (prefs.requestParams) requestParams.set(prefs.requestParams as Record<string, unknown>);
 		if (prefs.showUpdateToast !== undefined)
 			showUpdateToastPref.set(prefs.showUpdateToast as boolean);
+		textScale.set(
+			typeof appearance.textScale === 'number'
+				? appearance.textScale
+				: typeof prefs.textScale === 'number'
+					? (prefs.textScale as number)
+					: null
+		);
 		const pwaPrefs = prefs.pwa;
 		if (pwaPrefs)
 			pwaPreferences.set({
@@ -488,25 +478,19 @@ export async function initState(): Promise<void> {
 /** @deprecated Use initState */
 export const loadStateFromServer = initState;
 
-// ── Theme application ───────────────────────────────────────────
+// ── Appearance application ──────────────────────────────────────
 
-function applyTheme(t: Theme) {
-	if (typeof window === 'undefined') return;
-	let resolved = t;
-	if (t === 'system') {
-		resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-	}
-	document.documentElement.classList.toggle('dark', resolved === 'dark');
-	document.documentElement.style.colorScheme = resolved;
-	const meta = document.querySelector('meta[name="theme-color"]');
-	if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0d0d0d' : '#ffffff');
+function applyCurrentAppearance() {
+	applyAppearance(get(theme), get(themeConfig), get(textScale));
 }
 
-theme.subscribe(applyTheme);
+theme.subscribe(applyCurrentAppearance);
+themeConfig.subscribe(applyCurrentAppearance);
+textScale.subscribe(applyCurrentAppearance);
 
 if (typeof window !== 'undefined') {
 	window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-		if (get(theme) === 'system') applyTheme('system');
+		if (get(theme) === 'system') applyCurrentAppearance();
 	});
 }
 
@@ -525,6 +509,10 @@ if (typeof BroadcastChannel !== 'undefined') {
 		try {
 			if (type === 'theme' && value) {
 				theme.set(value);
+			} else if (type === 'appearance' && value) {
+				if (value.theme) theme.set(value.theme);
+				themeConfig.set(sanitizeThemeConfig(value.themeConfig));
+				textScale.set(typeof value.textScale === 'number' ? value.textScale : null);
 			} else if (type === 'locale' && value) {
 				changeLocale(value);
 			}
@@ -536,6 +524,28 @@ if (typeof BroadcastChannel !== 'undefined') {
 	theme.subscribe((t) => {
 		if (!_syncingFromBroadcast) {
 			channel.postMessage({ type: 'theme', value: t });
+			channel.postMessage({
+				type: 'appearance',
+				value: { theme: t, themeConfig: get(themeConfig), textScale: get(textScale) }
+			});
+		}
+	});
+
+	themeConfig.subscribe((config) => {
+		if (!_syncingFromBroadcast) {
+			channel.postMessage({
+				type: 'appearance',
+				value: { theme: get(theme), themeConfig: config, textScale: get(textScale) }
+			});
+		}
+	});
+
+	textScale.subscribe((scale) => {
+		if (!_syncingFromBroadcast) {
+			channel.postMessage({
+				type: 'appearance',
+				value: { theme: get(theme), themeConfig: get(themeConfig), textScale: scale }
+			});
 		}
 	});
 
@@ -1034,23 +1044,33 @@ export function closeGroup(groupId: string): void {
 	currentWorkspace.update((ws) => {
 		if (!ws) return ws;
 
-		// Clean up terminal sessions in this group
-		const group = ws.groups.find((g) => g.id === groupId);
-		if (group) {
-			group.tabs.forEach((t) => {
-				if (t.type === 'terminal' && t.sessionId) deleteSession(t.sessionId);
-			});
-		}
+		const closingGroup = ws.groups.find((g) => g.id === groupId);
+		const remainingGroups = ws.groups.filter((g) => g.id !== groupId);
+		const targetGroup =
+			remainingGroups.find((g) => g.id === ws.activeGroupId) ?? remainingGroups[0];
+		if (!closingGroup || !targetGroup) return ws;
 
-		let newGroups = ws.groups.filter((g) => g.id !== groupId);
-		if (newGroups.length === 0) {
-			newGroups = [createDefaultGroup()];
-		}
-		const activeGroupStillExists = newGroups.some((g) => g.id === ws.activeGroupId);
+		const existingTabIds = new Set(targetGroup.tabs.map((t) => t.id));
+		const movedTabs = closingGroup.tabs.filter((t) => !existingTabIds.has(t.id));
+		const tabs = [...targetGroup.tabs, ...movedTabs];
+		const activeTabId =
+			ws.activeGroupId === closingGroup.id && tabs.some((t) => t.id === closingGroup.activeTabId)
+				? closingGroup.activeTabId
+				: targetGroup.activeTabId;
+		const newGroups = remainingGroups.map((g) =>
+			g.id === targetGroup.id
+				? {
+						...g,
+						tabs,
+						activeTabId: tabs.some((t) => t.id === activeTabId) ? activeTabId : (tabs[0]?.id ?? '')
+					}
+				: g
+		);
+
 		return {
 			...ws,
 			groups: newGroups,
-			activeGroupId: activeGroupStillExists ? ws.activeGroupId : newGroups[0].id
+			activeGroupId: targetGroup.id
 		};
 	});
 }
@@ -1080,11 +1100,46 @@ export function moveTabToGroup(tabId: string, fromGroupId: string, toGroupId: st
 		newGroups = newGroups.filter((g) => g.tabs.length > 0);
 		if (newGroups.length === 0) newGroups = [createDefaultGroup()];
 
-		const activeGroupStillExists = newGroups.some((g) => g.id === ws.activeGroupId);
+		const targetGroupStillExists = newGroups.some((g) => g.id === toGroupId);
 		return {
 			...ws,
 			groups: newGroups,
-			activeGroupId: activeGroupStillExists ? ws.activeGroupId : newGroups[0].id
+			activeGroupId: targetGroupStillExists ? toGroupId : newGroups[0].id
+		};
+	});
+}
+
+export function moveTabToNewSplit(
+	tabId: string,
+	fromGroupId: string,
+	direction: SplitDirection,
+	placement: 'before' | 'after' = 'after'
+): void {
+	currentWorkspace.update((ws) => {
+		if (!ws || ws.groups.length > 1) return ws;
+		const fromGroup = ws.groups.find((g) => g.id === fromGroupId);
+		if (!fromGroup) return ws;
+		const tab = fromGroup.tabs.find((t) => t.id === tabId);
+		if (!tab || tab.permanent) return ws;
+
+		const newGroup: EditorGroup = {
+			id: nextId(),
+			tabs: [tab],
+			activeTabId: tab.id
+		};
+		let groups = ws.groups.map((g) => {
+			if (g.id !== fromGroupId) return g;
+			const tabs = g.tabs.filter((t) => t.id !== tabId);
+			return { ...g, tabs, activeTabId: tabs[0]?.id ?? '' };
+		});
+		groups = groups.filter((g) => g.tabs.length > 0);
+
+		return {
+			...ws,
+			groups: placement === 'before' ? [newGroup, ...groups] : [...groups, newGroup],
+			activeGroupId: newGroup.id,
+			splitDirection: direction,
+			splitRatio: ws.splitRatio ?? 0.5
 		};
 	});
 }

@@ -14,11 +14,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import mimetypes
 import os
 import time
 import uuid
 from pathlib import Path
-from typing import Literal, Optional, get_args, get_origin, get_type_hints
+from typing import Any, Literal, Optional, get_args, get_origin, get_type_hints
 from cptr.env import CHAT_TOOL_COMMAND_MAX_CHARS, CHAT_TOOL_MAX_CHARS, EXECUTE_TIMEOUT
 
 try:
@@ -37,10 +38,10 @@ except ImportError:
     _PTY_AVAILABLE = False  # Windows
 
 
-# ── Background task state ───────────────────────────────────
+# ── Command session state ───────────────────────────────────
 
-_bg_tasks: dict[str, dict] = {}
-# task_id → {
+command_sessions: dict[str, dict] = {}
+# command_session_id → {
 #   "master_fd": int | None,   PTY mode (Unix) — read/write through this fd
 #   "proc": Popen | Process,   The child process handle
 #   "output": bytearray,       In-memory ring buffer (256KB cap)
@@ -49,7 +50,7 @@ _bg_tasks: dict[str, dict] = {}
 #   "exit_code": int | None,
 #   "log_path": str,
 # }
-_BG_TASK_LIMIT = 5
+MAX_COMMAND_SESSIONS = 5
 _MAX_LOG_SIZE = 50 * 1024 * 1024  # 50MB — rotate when exceeded
 
 
@@ -112,17 +113,18 @@ def _rotate_log(log_path: str, log_file) -> tuple:
     return new_file, new_size
 
 
-async def _collect_bg_output(task_id: str):
-    """Read output from a background process (PTY or pipe) into memory + JSONL log."""
-    task = _bg_tasks.get(task_id)
-    if not task:
+async def stream_command_session_output(command_session_id: str):
+    """Read output from a command process into memory + JSONL log."""
+    session = command_sessions.get(command_session_id)
+    if not session:
         return
 
-    master_fd = task.get("master_fd")
-    proc = task["proc"]
-    log_path = task.get("log_path")
+    master_fd = session.get("master_fd")
+    proc = session["proc"]
+    log_path = session.get("log_path")
     log_file = None
     log_bytes = 0
+    loop = asyncio.get_event_loop()
 
     try:
         if log_path:
@@ -132,7 +134,7 @@ async def _collect_bg_output(task_id: str):
                 json.dumps(
                     {
                         "type": "start",
-                        "command": task["command"],
+                        "command": session["command"],
                         "pid": proc.pid,
                         "ts": time.time(),
                     }
@@ -142,8 +144,6 @@ async def _collect_bg_output(task_id: str):
             log_file.write(entry)
             log_file.flush()
             log_bytes += len(entry.encode("utf-8", errors="replace"))
-
-        loop = asyncio.get_event_loop()
 
         while True:
             # Read from PTY fd (Unix) or subprocess pipe (Windows fallback)
@@ -159,12 +159,14 @@ async def _collect_bg_output(task_id: str):
                 if not chunk:
                     break
 
-            task = _bg_tasks.get(task_id)
-            if task:
-                task["output"].extend(chunk)
-                task["total_bytes"] += len(chunk)
-                if len(task["output"]) > 256 * 1024:
-                    task["output"] = task["output"][-256 * 1024 :]
+            session = command_sessions.get(command_session_id)
+            if session:
+                session["output"].extend(chunk)
+                session["total_bytes"] += len(chunk)
+                if len(session["output"]) > 256 * 1024:
+                    session["output"] = session["output"][-256 * 1024 :]
+                async with session["condition"]:
+                    session["condition"].notify_all()
 
             if log_file:
                 entry = (
@@ -187,7 +189,7 @@ async def _collect_bg_output(task_id: str):
         pass
     finally:
         # Wait for the process to finish and collect exit code
-        task = _bg_tasks.get(task_id)
+        session = command_sessions.get(command_session_id)
         if master_fd is not None:
             exit_code = await loop.run_in_executor(None, proc.wait)
             try:
@@ -198,10 +200,12 @@ async def _collect_bg_output(task_id: str):
             await proc.wait()
             exit_code = proc.returncode
 
-        if task:
-            task["done"] = True
-            task["exit_code"] = exit_code
-            task["master_fd"] = None  # fd is closed
+        if session:
+            session["done"] = True
+            session["exit_code"] = exit_code
+            session["master_fd"] = None  # fd is closed
+            async with session["condition"]:
+                session["condition"].notify_all()
 
         if log_file:
             log_file.write(
@@ -230,12 +234,151 @@ def _human_size(size: int) -> str:
     return f"{size:.1f}TB"
 
 
+def _file_kind(path: Path, mime_type: str) -> str:
+    ext = path.suffix.lower()
+    if mime_type.startswith("image/"):
+        return "image"
+    if mime_type.startswith("audio/"):
+        return "audio"
+    if mime_type.startswith("video/"):
+        return "video"
+    if mime_type == "application/pdf":
+        return "pdf"
+    if ext in {".md", ".markdown", ".mdx"}:
+        return "markdown"
+    if ext in {".json", ".jsonc", ".json5"}:
+        return "json"
+    if ext in {".csv", ".tsv"}:
+        return "csv"
+    if ext in {".html", ".htm"}:
+        return "html"
+    if ext == ".svg":
+        return "svg"
+    if ext in {".txt", ".log", ".diff", ".patch"} or mime_type.startswith("text/"):
+        return "text"
+    if ext in {".docx", ".xlsx", ".xls", ".pptx"}:
+        return "office"
+    if ext in {".sqlite", ".sqlite3", ".db", ".db3"}:
+        return "sqlite"
+    if ext in {".zip", ".tar", ".gz", ".tgz", ".rar", ".7z"}:
+        return "archive"
+    return "binary"
+
+
 def _truncate_output(text: str, max_chars: int = 80_000) -> str:
     """Truncate long output, keeping head and tail."""
     if len(text) <= max_chars:
         return text
     half = max_chars // 2
     return text[:half] + "\n\n... (truncated) ...\n\n" + text[-half:]
+
+
+def _command_session_snapshot(command_session_id: str, session: dict) -> dict[str, Any]:
+    return {
+        "command_session_id": command_session_id,
+        "task_id": command_session_id,  # legacy UI/tool wording
+        "workspace": session.get("workspace", ""),
+        "chat_id": session.get("chat_id"),
+        "message_id": session.get("message_id"),
+        "call_id": session.get("call_id"),
+        "command": session.get("command", ""),
+        "created_at": session.get("created_at", 0),
+        "status": "completed" if session.get("done") else "running",
+        "done": bool(session.get("done")),
+        "exit_code": session.get("exit_code"),
+        "total_bytes": int(session.get("total_bytes") or 0),
+        "output": bytes(session.get("output") or b"").decode(errors="replace"),
+    }
+
+
+def list_command_sessions(
+    workspace: str | None = None, chat_id: str | None = None
+) -> list[dict[str, Any]]:
+    sessions: list[dict[str, Any]] = []
+    for command_session_id, session in command_sessions.items():
+        if session.get("done"):
+            continue
+        if workspace and session.get("workspace") != workspace:
+            continue
+        if chat_id and session.get("chat_id") != chat_id:
+            continue
+        sessions.append(_command_session_snapshot(command_session_id, session))
+    sessions.sort(key=lambda item: (item["status"] != "running", -float(item["created_at"] or 0)))
+    return sessions
+
+
+def get_command_session(command_session_id: str) -> dict | None:
+    return command_sessions.get(command_session_id)
+
+
+def command_session_bytes_since(session: dict, offset: int) -> tuple[bytes, int]:
+    buf = session["output"]
+    total = int(session.get("total_bytes") or 0)
+    buf_start = total - len(buf)
+    if offset <= buf_start:
+        raw = bytes(buf)
+    else:
+        raw = bytes(buf[offset - buf_start :])
+    return raw, total
+
+
+def send_command_session_input(command_session_id: str, data: bytes) -> str | None:
+    session = command_sessions.get(command_session_id)
+    if not session:
+        return "command session not found"
+    if session.get("done"):
+        return "command session already exited"
+
+    master_fd = session.get("master_fd")
+    if master_fd is not None:
+        try:
+            os.write(master_fd, data)
+        except OSError:
+            return "PTY closed"
+    else:
+        proc = session["proc"]
+        if proc.stdin is None:
+            return "stdin unavailable"
+        try:
+            proc.stdin.write(data)
+            if hasattr(proc.stdin, "drain"):
+                # asyncio subprocess pipe
+                return None
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return "stdin closed"
+    return None
+
+
+async def drain_command_session_input(command_session_id: str) -> None:
+    session = command_sessions.get(command_session_id)
+    proc = session.get("proc") if session else None
+    stdin = getattr(proc, "stdin", None)
+    if stdin is not None and hasattr(stdin, "drain"):
+        await stdin.drain()
+
+
+def resize_command_session(command_session_id: str, rows: int, cols: int) -> None:
+    session = command_sessions.get(command_session_id)
+    if not session or session.get("done"):
+        return
+    master_fd = session.get("master_fd")
+    if master_fd is None or not _PTY_AVAILABLE:
+        return
+    try:
+        winsize = struct.pack("HHHH", rows, cols, 0, 0)
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+    except OSError:
+        pass
+
+
+def stop_command_session(command_session_id: str, force: bool = False) -> str | None:
+    session = command_sessions.get(command_session_id)
+    if not session:
+        return "command session not found"
+    if session.get("done"):
+        return None
+    _kill_process_group(session["proc"].pid, force=force)
+    return None
 
 
 # ── Image support ───────────────────────────────────────────
@@ -705,6 +848,48 @@ async def write_file(path: str, content: str, *, workspace: str) -> str:
     return f"Wrote {len(content)} bytes to {path}"
 
 
+async def display_file(path: str, *, workspace: str) -> str:
+    """Display a workspace file inline in chat.
+    Use when the user asks to see, preview, render, or display a file you created or found.
+    :param path: Path relative to workspace root.
+    """
+    if not path:
+        return "Error: path is required."
+
+    try:
+        full = _resolve_path(path, workspace)
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+    if _is_dotenv(full):
+        return _DOTENV_ERROR
+    if not full.exists():
+        return f"Error: file not found: {path}"
+    if not full.is_file():
+        return f"Error: not a file: {path}"
+
+    stat = await asyncio.to_thread(full.stat)
+    mime_type = mimetypes.guess_type(str(full))[0] or "application/octet-stream"
+    ws = Path(workspace).resolve()
+    try:
+        display_path = str(full.relative_to(ws))
+    except ValueError:
+        display_path = str(full)
+    return json.dumps(
+        {
+            "type": "file",
+            "path": display_path,
+            "full_path": str(full),
+            "workspace": str(ws),
+            "name": full.name,
+            "size": stat.st_size,
+            "mime_type": mime_type,
+            "kind": _file_kind(full, mime_type),
+        },
+        ensure_ascii=False,
+    )
+
+
 async def edit_file(
     path: str,
     target: str,
@@ -834,20 +1019,21 @@ async def run_command(
     cwd: str = ".",
     wait: Optional[int] = None,
     *,
-    workspace: str,
+    __context__: dict,
 ) -> str:
     """Run a shell command. Returns a task_id for status checks and input.
     :param command: The shell command to execute.
     :param cwd: Working directory relative to workspace root.
     :param wait: Seconds to wait for the command to finish before returning (max 300). Returns early if done sooner. Null returns immediately. Use 30-60 for installs and builds, 5-10 for quick commands, null or 0 for long-lived servers.
     """
+    workspace = __context__["workspace"]
     work_dir = _resolve_path(cwd, workspace)
     if not work_dir.is_dir():
         return f"Error: not a directory: {cwd}"
 
-    active = sum(1 for t in _bg_tasks.values() if not t.get("done"))
-    if active >= _BG_TASK_LIMIT:
-        return f"Error: too many running tasks ({active}/{_BG_TASK_LIMIT}). Kill one first."
+    active = sum(1 for t in command_sessions.values() if not t.get("done"))
+    if active >= MAX_COMMAND_SESSIONS:
+        return f"Error: too many running command sessions ({active}/{MAX_COMMAND_SESSIONS}). Stop one first."
 
     env = {**os.environ, "PAGER": "cat", "GIT_PAGER": "cat"}
     master_fd = None
@@ -867,24 +1053,31 @@ async def run_command(
     except Exception as e:
         return f"Error: {e}"
 
-    task_id = uuid.uuid4().hex[:8]
+    command_session_id = uuid.uuid4().hex[:8]
     log_dir = Path(workspace) / ".cptr" / "task_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{task_id}.jsonl"
+    log_path = log_dir / f"{command_session_id}.jsonl"
 
-    _bg_tasks[task_id] = {
+    command_sessions[command_session_id] = {
+        "command_session_id": command_session_id,
         "master_fd": master_fd,
         "proc": proc,
         "output": bytearray(),
         "total_bytes": 0,
         "command": command,
+        "workspace": workspace,
+        "chat_id": __context__.get("chat_id"),
+        "message_id": __context__.get("message_id"),
+        "call_id": __context__.get("call_id"),
+        "created_at": time.time(),
         "done": False,
         "exit_code": None,
         "log_path": str(log_path),
         "log_task": None,
+        "condition": asyncio.Condition(),
     }
-    log_task = asyncio.create_task(_collect_bg_output(task_id))
-    _bg_tasks[task_id]["log_task"] = log_task
+    log_task = asyncio.create_task(stream_command_session_output(command_session_id))
+    command_sessions[command_session_id]["log_task"] = log_task
 
     # Wait for the command to finish inline (matches open-terminal behaviour)
     if wait is None and EXECUTE_TIMEOUT:
@@ -895,7 +1088,7 @@ async def run_command(
         except asyncio.TimeoutError:
             pass
 
-    task = _bg_tasks.get(task_id)
+    task = command_sessions.get(command_session_id)
     output = task["output"].decode(errors="replace") if task else ""
     output = _truncate_output(output, max_chars=CHAT_TOOL_COMMAND_MAX_CHARS)
     done = task.get("done", False) if task else True
@@ -907,9 +1100,7 @@ async def run_command(
     else:
         status = "running"
 
-    return (
-        f"Task {task_id}: {status}\nCommand: {command}\nnext_offset: {next_offset}\n---\n{output}"
-    )
+    return f"Task {command_session_id}: {status}\nCommand: {command}\nnext_offset: {next_offset}\n---\n{output}"
 
 
 async def check_task(
@@ -920,9 +1111,9 @@ async def check_task(
     :param offset: Byte offset from previous check. Pass next_offset from the last response to get only new output.
     :param wait: Seconds to wait for the task to finish before returning (max 300). Returns early if done sooner. Null returns immediately.
     """
-    task = _bg_tasks.get(task_id)
+    task = command_sessions.get(task_id)
     if not task:
-        available = list(_bg_tasks.keys())
+        available = list(command_sessions.keys())
         return f"Error: no task with id '{task_id}'. Active tasks: {available or 'none'}"
 
     # Optionally wait for the task to finish
@@ -965,19 +1156,16 @@ async def kill_task(task_id: str, force: bool = False, *, workspace: str) -> str
     :param task_id: The task ID to kill.
     :param force: Send SIGKILL instead of SIGTERM for immediate termination.
     """
-    task = _bg_tasks.get(task_id)
+    task = command_sessions.get(task_id)
     if not task:
-        available = list(_bg_tasks.keys())
+        available = list(command_sessions.keys())
         return f"Error: no task with id '{task_id}'. Active tasks: {available or 'none'}"
 
     if task.get("done", False):
         exit_code = task.get("exit_code")
-        _bg_tasks.pop(task_id, None)
         return f"Task {task_id} already finished (code {exit_code})"
 
-    proc = task["proc"]
-    _kill_process_group(proc.pid, force=force)
-    _bg_tasks.pop(task_id, None)
+    stop_command_session(task_id, force=force)
 
     action = "Killed" if force else "Terminated"
     return f"{action} task {task_id}"
@@ -988,9 +1176,9 @@ async def send_input(task_id: str, input: str, *, workspace: str) -> str:
     :param task_id: The task ID returned by run_command.
     :param input: Text to send. Use \\n for Enter, \\x03 for Ctrl-C, \\x04 for Ctrl-D.
     """
-    task = _bg_tasks.get(task_id)
+    task = command_sessions.get(task_id)
     if not task:
-        available = list(_bg_tasks.keys())
+        available = list(command_sessions.keys())
         return f"Error: no task '{task_id}'. Active: {available or 'none'}"
 
     if task.get("done", False):
@@ -1002,23 +1190,10 @@ async def send_input(task_id: str, input: str, *, workspace: str) -> str:
     except (UnicodeDecodeError, ValueError):
         text = input
 
-    master_fd = task.get("master_fd")
-    if master_fd is not None:
-        # PTY mode: write to master fd
-        try:
-            os.write(master_fd, text.encode())
-        except OSError:
-            return f"Error: PTY closed for task {task_id}"
-    else:
-        # Pipe mode fallback
-        proc = task["proc"]
-        if proc.stdin is None:
-            return f"Error: task {task_id} has no stdin"
-        try:
-            proc.stdin.write(text.encode())
-            await proc.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            return f"Error: stdin closed for task {task_id}"
+    error = send_command_session_input(task_id, text.encode())
+    if error:
+        return f"Error: {error} for task {task_id}"
+    await drain_command_session_input(task_id)
 
     return f"Sent {len(text)} bytes to task {task_id}"
 
@@ -1320,6 +1495,43 @@ async def view_skill(
     return format_skill_content(skill)
 
 
+async def manage_skill(
+    action: Literal["create", "write_file"],
+    name: str,
+    content: Optional[str] = None,
+    scope: Literal["workspace", "global"] = "workspace",
+    file_path: Optional[str] = None,
+    file_content: Optional[str] = None,
+    *,
+    __context__: dict,
+) -> str:
+    """Create Computer-managed skills and supporting bundle files.
+
+    Use this only when the user asks to create a reusable skill. New skills
+    default to the current workspace. For supporting files, write only under
+    references/, templates/, scripts/, or assets/.
+    :param action: "create" to write SKILL.md, or "write_file" to add a bundle file.
+    :param name: Lowercase hyphenated skill name.
+    :param content: Full SKILL.md content for action="create".
+    :param scope: "workspace" for .cptr/skills, or "global" for ~/.cptr/skills.
+    :param file_path: Relative bundle path for action="write_file".
+    :param file_content: File content for action="write_file".
+    """
+    from cptr.utils.skills import create_managed_skill, write_managed_skill_file
+
+    workspace = __context__.get("workspace", "")
+    try:
+        if action == "create":
+            result = create_managed_skill(workspace, name, content or "", scope)
+        elif action == "write_file":
+            result = write_managed_skill_file(workspace, name, file_path or "", file_content)
+        else:
+            result = {"success": False, "error": f"unsupported action '{action}'"}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+    return json.dumps(result, ensure_ascii=False)
+
+
 # ── Browser tools ────────────────────────────────────────────
 
 
@@ -1488,6 +1700,8 @@ async def image_generate(
     __context__: dict,
 ) -> str:
     """Generate or edit image files from a prompt.
+    Returns saved image file paths. You must call display_file next for each returned path
+    before responding to the user.
     :param prompt: Detailed description of the image to create or the edits to make.
     :param image: Optional source image file id, /api/files/... URL, or workspace path for edit mode.
     :param images: Optional source image file ids, /api/files/... URLs, or workspace paths for edit mode.
@@ -1786,6 +2000,26 @@ async def search_chats(
     )
 
 
+async def notify(message: str, target: str = "", title: str = "", *, __context__: dict) -> str:
+    """Send a notification to a user notification target.
+
+    :param message: Message body to send.
+    :param target: Optional notification target ID from Settings > Notifications. Uses the default target when omitted.
+    :param title: Optional notification title.
+    """
+    user_id = __context__.get("user_id")
+    if not user_id:
+        return "Error: authentication required."
+    try:
+        from cptr.utils.notifications import NotificationError, notify_target
+
+        return await notify_target(user_id, message, target or None, title or None)
+    except NotificationError as exc:
+        return f"Error: {exc}"
+    except Exception as exc:
+        return f"Error: failed to send notification: {exc}"
+
+
 # ── Registry ────────────────────────────────────────────────
 
 TOOLS: dict[str, dict] = {
@@ -1801,6 +2035,7 @@ TOOLS: dict[str, dict] = {
     "view_skill": {"fn": view_skill, "auto": True},
     # Write / mutate (require approval unless auto_approve_all)
     "create_file": {"fn": create_file, "auto": False},
+    "display_file": {"fn": display_file, "auto": False},
     "edit_file": {"fn": edit_file, "auto": False},
     "multi_edit_file": {"fn": multi_edit_file, "auto": False},
     "write_file": {"fn": write_file, "auto": False},
@@ -1811,7 +2046,9 @@ TOOLS: dict[str, dict] = {
     "update_automation": {"fn": update_automation, "auto": False},
     "toggle_automation": {"fn": toggle_automation, "auto": False},
     "delete_automation": {"fn": delete_automation, "auto": False},
+    "notify": {"fn": notify, "auto": False},
     "image_generate": {"fn": image_generate, "auto": False},
+    "manage_skill": {"fn": manage_skill, "auto": False},
     "update_memory": {"fn": update_memory, "auto": True},
 }
 

@@ -8,7 +8,7 @@
 ![GitHub top language](https://img.shields.io/github/languages/top/open-webui/computer)
 ![GitHub last commit](https://img.shields.io/github/last-commit/open-webui/computer?color=red)
 [![Discord](https://img.shields.io/badge/Discord-Open_WebUI-blue?logo=discord&logoColor=white)](https://discord.gg/5rJgQTnV4s)
-[![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/tjbck)
+[![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/open-webui)
 
 ![Open WebUI Computer Demo](./demo.png)
 
@@ -30,6 +30,8 @@ To install every optional feature group, use `pip install 'cptr[all]'`.
 The Docker image includes all optional feature groups.
 
 Or with [uv](https://docs.astral.sh/uv/): `uvx cptr@latest run`
+
+On Windows, if opening a terminal reports a missing `VCRUNTIME140.dll` or Universal CRT DLL, install Microsoft's [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) and restart `cptr`.
 
 Opens in your browser at `http://localhost:8000`.
 
@@ -95,7 +97,7 @@ Bring your own API key (OpenAI, Anthropic, Ollama, or any OpenAI-compatible endp
 
 Connect a coding agent as a native backend and use the subscription you already pay for. No separate API key needed.
 
-**Codex** · **Claude Code** · **Cursor** · **Grok** · **OpenCode**
+**Codex** · **Claude Code** · **Cursor** · **Grok** · **OpenCode** · **Cline**
 
 Add an agent profile from Settings, pick your models, and it shows up in the model selector like any other provider. Conversations run inside your workspace with full tool access and resume where you left off.
 
@@ -119,7 +121,7 @@ Open WebUI Computer exposes an OpenAI-compatible API (`/v1/chat/completions`). A
 |---|---|
 | 🎙️ **Voice memos** | Record audio, auto-transcribe to markdown. |
 | 💬 **Message queue** | Queue follow-up messages while the AI is responding. |
-| 🔔 **Notifications** | Browser notifications and webhooks (Slack, Discord, Teams) when tasks finish. |
+| 🔔 **Notifications** | Browser notifications plus named webhook or bot targets for chat events. |
 | 📊 **Usage** | Token counts and timing on every response. |
 | 📄 **System prompts** | Per-model, per-workspace, or global. Template variables included. |
 | 📋 **Audit logging** | Structured audit trail of all API mutations with automatic redaction of sensitive data. |
@@ -167,6 +169,38 @@ Open WebUI Computer stores its state in `/data`. Mount your project into the con
 If you bind-mount a host directory to `/data`, make sure that directory is writable by the container user. SQLite needs to create and update `/data/app.db`, and host directory permissions take precedence over the image's built-in `/data` ownership.
 
 The `:dev` image is also available and tracks the `main` branch.
+
+## Air-gapped installation
+
+Open WebUI Computer does not need internet access after it is installed. The Python wheel includes the built frontend assets, and the Docker image is self-contained.
+
+On a connected machine:
+
+```bash
+pip download --dest wheelhouse 'cptr[all]'
+docker pull ghcr.io/open-webui/computer:latest
+docker save ghcr.io/open-webui/computer:latest -o cptr-image.tar
+```
+
+Transfer the artifacts, then install or run offline:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install --no-index --find-links ./wheelhouse 'cptr[all]'
+cptr run --host 0.0.0.0
+
+docker load -i cptr-image.tar
+docker run --rm -it \
+  --network=none \
+  -p 8000:8000 \
+  -v cptr-data:/data \
+  -v "$PWD:/workspace" \
+  -w /workspace \
+  ghcr.io/open-webui/computer:latest
+```
+
+Core local features run from local assets. External services such as hosted model APIs, web search providers, messaging adapters, Git remotes, and MCP/OpenAPI servers still require reachable endpoints.
 
 ## Security model
 

@@ -10,7 +10,11 @@
 	import { toast } from 'svelte-sonner';
 
 	import { createFileMention, extractMentionedFiles, type FileMentionAttrs } from './FileMention';
-	import { createSkillMention, extractMentionedSkills, type SkillMentionAttrs } from './SkillMention';
+	import {
+		createSkillMention,
+		extractMentionedSkills,
+		type SkillMentionAttrs
+	} from './SkillMention';
 	import FileSuggestionPopup from './FileSuggestionPopup.svelte';
 	import SkillSuggestionPopup from './SkillSuggestionPopup.svelte';
 	import { searchFiles } from '$lib/apis/files';
@@ -34,6 +38,8 @@
 	} from '$lib/stores/audio';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { t } from '$lib/i18n';
+	import { TAB_DRAG_MIME } from '$lib/constants';
+	import { tooltip } from '$lib/tooltip';
 
 	// Keep screen awake during voice mode conversations
 	let voiceWakeLock: WakeLockSentinel | null = null;
@@ -43,7 +49,9 @@
 		try {
 			if ('wakeLock' in navigator) {
 				voiceWakeLock = await navigator.wakeLock.request('screen');
-				voiceWakeLock.addEventListener('release', () => { voiceWakeLock = null; });
+				voiceWakeLock.addEventListener('release', () => {
+					voiceWakeLock = null;
+				});
 			}
 		} catch {}
 	}
@@ -66,6 +74,7 @@
 		oncompact?: () => void;
 		onplan?: () => void;
 		onstatus?: () => void;
+		onskillslist?: () => void;
 		oncancel?: () => void;
 		onqueuesendnow?: (id: string) => void;
 		onqueueedit?: (id: string) => void;
@@ -84,6 +93,7 @@
 		oncompact,
 		onplan,
 		onstatus,
+		onskillslist,
 		oncancel,
 		onqueuesendnow,
 		onqueueedit,
@@ -124,8 +134,16 @@
 	};
 
 	// ── File Uploads ────────────────────────────────
-	let attachedUploads = $state<{ id: string; name: string; url: string; type: string; loading?: boolean }[]>([]);
+	let attachedUploads = $state<
+		{ id: string; name: string; url: string; type: string; loading?: boolean }[]
+	>([]);
 	let isDragging = $state(false);
+
+	function isTabDrag(e: DragEvent): boolean {
+		return Boolean(
+			e.dataTransfer?.types.includes(TAB_DRAG_MIME) || e.dataTransfer?.types.includes('text/tab-id')
+		);
+	}
 
 	async function processFiles(files: File[]) {
 		for (const file of files) {
@@ -133,26 +151,28 @@
 			const isImage = file.type.startsWith('image/');
 			const type = isImage ? 'image' : 'file';
 			attachedUploads = [...attachedUploads, { id, name: file.name, url: '', type, loading: true }];
-			
+
 			try {
 				const form = new FormData();
 				form.append('file', file);
 				const res = await uploadFile(form);
 				if (res && res.id) {
-					attachedUploads = attachedUploads.map(u => 
+					attachedUploads = attachedUploads.map((u) =>
 						u.id === id ? { ...u, id: res.id, url: res.url, loading: false } : u
 					);
 				} else {
-					attachedUploads = attachedUploads.filter(u => u.id !== id);
+					attachedUploads = attachedUploads.filter((u) => u.id !== id);
 				}
 			} catch (err) {
-				console.error("Upload failed", err);
-				attachedUploads = attachedUploads.filter(u => u.id !== id);
+				console.error('Upload failed', err);
+				attachedUploads = attachedUploads.filter((u) => u.id !== id);
 			}
 		}
 	}
 
 	function handleDrop(e: DragEvent) {
+		if (isTabDrag(e)) return;
+
 		e.preventDefault();
 		isDragging = false;
 		if (e.dataTransfer?.files) {
@@ -177,7 +197,7 @@
 	}
 
 	function removeUpload(id: string) {
-		attachedUploads = attachedUploads.filter(u => u.id !== id);
+		attachedUploads = attachedUploads.filter((u) => u.id !== id);
 	}
 
 	// ── @file mention suggestion ────────────────────
@@ -344,7 +364,7 @@
 					id: s.name,
 					label: s.name,
 					description: s.description,
-					source: s.source,
+					source: s.source
 				}));
 			}
 			if (!query) return cachedSkills;
@@ -363,7 +383,9 @@
 		onselect: (i: number) => void
 	) {
 		if (skillPopupComponent) {
-			try { unmount(skillPopupComponent); } catch {}
+			try {
+				unmount(skillPopupComponent);
+			} catch {}
 			skillPopupComponent = null;
 		}
 		if (!skillPopupEl) {
@@ -433,7 +455,8 @@
 					return true;
 				}
 				if (event.key === 'ArrowUp') {
-					selectedIndex = (selectedIndex - 1 + currentItems.length) % Math.max(currentItems.length, 1);
+					selectedIndex =
+						(selectedIndex - 1 + currentItems.length) % Math.max(currentItems.length, 1);
 					remount();
 					return true;
 				}
@@ -468,7 +491,9 @@
 		stopSkillRepositionLoop();
 		skillActiveClientRectFn = null;
 		if (skillPopupComponent) {
-			try { unmount(skillPopupComponent); } catch {}
+			try {
+				unmount(skillPopupComponent);
+			} catch {}
 			skillPopupComponent = null;
 		}
 		if (skillPopupEl) {
@@ -594,7 +619,7 @@
 	}
 
 	export function getFiles(): any[] {
-		return attachedUploads.filter(u => !u.loading);
+		return attachedUploads.filter((u) => !u.loading);
 	}
 
 	export function clearUploads() {
@@ -625,7 +650,8 @@
 			streaming ||
 			sending ||
 			inputText.trim()
-		) return;
+		)
+			return;
 		voiceRearming = true;
 		voiceRestartTimer = window.setTimeout(() => {
 			voiceRestartTimer = 0;
@@ -679,7 +705,11 @@
 		}
 	}
 
-	async function stopVoiceCapture(): Promise<{ blob: Blob; filename: string; contentType: string } | null> {
+	async function stopVoiceCapture(): Promise<{
+		blob: Blob;
+		filename: string;
+		contentType: string;
+	} | null> {
 		const recorder = voiceCaptureRecorder;
 		const stream = voiceCaptureStream;
 		const chunks = voiceCaptureChunks;
@@ -732,9 +762,11 @@
 		} catch {}
 	}
 
-	async function transcribeVoiceModeCapture(
-		capture: { blob: Blob; filename: string; contentType: string }
-	): Promise<string> {
+	async function transcribeVoiceModeCapture(capture: {
+		blob: Blob;
+		filename: string;
+		contentType: string;
+	}): Promise<string> {
 		const form = new FormData();
 		form.append('file', capture.blob, capture.filename);
 		form.append('workspace', workspace);
@@ -898,6 +930,14 @@
 		if (oncompact && '/compact'.startsWith(slashCommandQuery)) ids.push('compact');
 		if (onplan && '/plan'.startsWith(slashCommandQuery)) ids.push('plan');
 		if (onstatus && '/status'.startsWith(slashCommandQuery)) ids.push('status');
+		if (
+			onskillslist &&
+			slashCommandQuery !== '/skills:list' &&
+			'/skills:list'.startsWith(slashCommandQuery)
+		)
+			ids.push('skills:list');
+		if (slashCommandQuery !== '/skills:create' && '/skills:create'.startsWith(slashCommandQuery))
+			ids.push('skills:create');
 		return ids;
 	});
 	const showSlashCommands = $derived(slashCommandIds.length > 0);
@@ -926,6 +966,15 @@
 			onstatus();
 			return;
 		}
+		if (commandId === 'skills:list' && onskillslist) {
+			inputText = '';
+			onskillslist();
+			return;
+		}
+		if (commandId === 'skills:create') {
+			inputText = '/skills:create ';
+			return;
+		}
 		onsend();
 	}
 
@@ -937,18 +986,27 @@
 	const canSend = $derived(!!(inputText.trim() && selectedModel && !sending));
 </script>
 
-<div 
+<div
 	class="relative {isDragging ? 'ring-2 ring-blue-500 rounded-3xl' : ''}"
 	ondrop={handleDrop}
 	onpaste={handlePaste}
-	ondragover={(e) => { e.preventDefault(); isDragging = true; }}
-	ondragleave={() => { isDragging = false; }}
+	ondragover={(e) => {
+		if (isTabDrag(e)) {
+			isDragging = false;
+			return;
+		}
+		e.preventDefault();
+		isDragging = true;
+	}}
+	ondragleave={() => {
+		isDragging = false;
+	}}
 	role="presentation"
 >
 	<!-- Queued messages (above input, matching open-webui layout) -->
 	{#if queuedMessages.length > 0}
 		<div
-			class="mb-1 mx-2 py-0.5 px-1.5 rounded-2xl border border-gray-100 dark:border-white/5 overflow-x-hidden overflow-y-auto max-h-[25vh]"
+			class="app-subtle-surface mb-1 mx-2 py-0.5 px-1.5 rounded-2xl border overflow-x-hidden overflow-y-auto max-h-[25vh]"
 		>
 			{#each queuedMessages as qm (qm.id)}
 				<QueuedMessageItem
@@ -964,18 +1022,20 @@
 
 	{#if showSlashCommands}
 		<div
-			class="absolute left-2 bottom-full mb-1 z-50 w-60 max-h-40 overflow-y-auto rounded-xl bg-white dark:bg-[#1a1a1a] border border-gray-150 dark:border-white/6 shadow-xl p-0.5"
+			class="app-theme app-surface absolute left-2 bottom-full mb-1 z-50 w-60 max-h-40 overflow-y-auto rounded-xl border shadow-xl p-0.5"
 		>
-			<div class="mb-0.5 px-2 pt-1 pb-0.5 text-[10px] leading-none text-gray-400 dark:text-gray-600">
-				Commands
+			<div class="app-muted mb-0.5 px-2 pt-1 pb-0.5 text-[0.625rem] leading-none">
+				{$t('chat.commands')}
 			</div>
 			{#if slashCommandIds.includes('compact')}
 				<button
 					type="button"
-					class="flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
+					aria-label="Compact: shorten older messages so this chat can keep going."
+					use:tooltip={{ content: 'Shorten older messages so this chat can keep going.', placement: 'right' }}
+					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
 						{slashCommandIds[selectedSlashCommandIndex] === 'compact'
-						? 'bg-gray-50 dark:bg-white/5 text-gray-900 dark:text-white'
-						: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'} disabled:opacity-50"
+						? 'app-interactive-active'
+						: ''} disabled:opacity-50"
 					disabled={sending || streaming}
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => {
@@ -983,7 +1043,7 @@
 					}}
 					onmouseenter={() => (selectedSlashCommandIndex = slashCommandIds.indexOf('compact'))}
 				>
-					<span class="flex items-center justify-center w-4 shrink-0 text-gray-400 dark:text-gray-500">
+					<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
 						<svg class="size-3.5 -rotate-90" viewBox="0 0 20 20" aria-hidden="true">
 							<circle
 								cx="10"
@@ -1009,7 +1069,7 @@
 					</span>
 					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
 						<span class="truncate">{$t('chat.commandCompact')}</span>
-						<span class="text-[10px] text-gray-400 dark:text-gray-600 truncate shrink-0">
+						<span class="app-muted text-[0.625rem] truncate shrink-0">
 							{$t('chat.commandCompactPercent', { percent: contextPercent })}
 						</span>
 					</span>
@@ -1018,17 +1078,20 @@
 			{#if slashCommandIds.includes('plan')}
 				<button
 					type="button"
-					class="flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
-						{slashCommandIds[selectedSlashCommandIndex] === 'plan'
-						? 'bg-gray-50 dark:bg-white/5 text-gray-900 dark:text-white'
-						: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}"
+					aria-label="Plan: work out a plan first, then wait before changing files."
+					use:tooltip={{
+						content: 'Work out a plan first, then wait before changing files.',
+						placement: 'right'
+					}}
+					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
+						{slashCommandIds[selectedSlashCommandIndex] === 'plan' ? 'app-interactive-active' : ''}"
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => {
 						runSlashCommand('plan');
 					}}
 					onmouseenter={() => (selectedSlashCommandIndex = slashCommandIds.indexOf('plan'))}
 				>
-					<span class="flex items-center justify-center w-4 shrink-0 text-gray-400 dark:text-gray-500">
+					<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
 						<svg
 							class="size-3.5"
 							viewBox="0 0 24 24"
@@ -1047,7 +1110,7 @@
 					</span>
 					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
 						<span class="truncate">{$t('chat.commandPlan')}</span>
-						<span class="text-[10px] text-gray-400 dark:text-gray-600 truncate shrink-0">
+						<span class="app-muted text-[0.625rem] truncate shrink-0">
 							{$planMode ? $t('chat.commandPlanOn') : $t('chat.commandPlanOff')}
 						</span>
 					</span>
@@ -1056,17 +1119,20 @@
 			{#if slashCommandIds.includes('status')}
 				<button
 					type="button"
-					class="flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
-						{slashCommandIds[selectedSlashCommandIndex] === 'status'
-						? 'bg-gray-50 dark:bg-white/5 text-gray-900 dark:text-white'
-						: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}"
+					aria-label="Status: check what is running in this chat."
+					use:tooltip={{
+						content: 'Check what is running in this chat.',
+						placement: 'right'
+					}}
+					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
+						{slashCommandIds[selectedSlashCommandIndex] === 'status' ? 'app-interactive-active' : ''}"
 					onmousedown={(e) => e.preventDefault()}
 					onclick={() => {
 						runSlashCommand('status');
 					}}
 					onmouseenter={() => (selectedSlashCommandIndex = slashCommandIds.indexOf('status'))}
 				>
-					<span class="flex items-center justify-center w-4 shrink-0 text-gray-400 dark:text-gray-500">
+					<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
 						<svg
 							class="size-3.5"
 							viewBox="0 0 24 24"
@@ -1083,52 +1149,122 @@
 					</span>
 					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
 						<span class="truncate">{$t('chat.commandStatus')}</span>
-						<span class="text-[10px] text-gray-400 dark:text-gray-600 truncate shrink-0">
+						<span class="app-muted text-[0.625rem] truncate shrink-0">
 							{$t('chat.commandStatusDesc')}
 						</span>
+					</span>
+				</button>
+			{/if}
+			{#if slashCommandIds.includes('skills:list')}
+				<button
+					type="button"
+					aria-label="List skills: see the skills available in this workspace."
+					use:tooltip={{
+						content: 'See the skills available in this workspace.',
+						placement: 'right'
+					}}
+					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
+						{slashCommandIds[selectedSlashCommandIndex] === 'skills:list'
+						? 'app-interactive-active'
+						: ''}"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => {
+						runSlashCommand('skills:list');
+					}}
+					onmouseenter={() => (selectedSlashCommandIndex = slashCommandIds.indexOf('skills:list'))}
+				>
+					<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
+						<Icon name="list" size={14} />
+					</span>
+					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
+						<span class="truncate">List skills</span>
+						<span class="app-muted text-[0.625rem] truncate shrink-0">/skills:list</span>
+					</span>
+				</button>
+			{/if}
+			{#if slashCommandIds.includes('skills:create')}
+				<button
+					type="button"
+					aria-label="Create skill: teach Computer a reusable workflow."
+					use:tooltip={{
+						content: 'Teach Computer a reusable workflow.',
+						placement: 'right'
+					}}
+					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
+						{slashCommandIds[selectedSlashCommandIndex] === 'skills:create'
+						? 'app-interactive-active'
+						: ''}"
+					onmousedown={(e) => e.preventDefault()}
+					onclick={() => {
+						runSlashCommand('skills:create');
+					}}
+					onmouseenter={() => (selectedSlashCommandIndex = slashCommandIds.indexOf('skills:create'))}
+				>
+					<span class="app-icon-muted flex items-center justify-center w-4 shrink-0">
+						<Icon name="plus" size={14} />
+					</span>
+					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
+						<span class="truncate">Create skill</span>
+						<span class="app-muted text-[0.625rem] truncate shrink-0">/skills:create</span>
 					</span>
 				</button>
 			{/if}
 		</div>
 	{/if}
 
-	<div
-		class="rounded-3xl shadow-lg border border-gray-100/40 dark:border-white/4 focus-within:border-gray-200/50 focus-within:dark:border-white/8 transition px-1 bg-white dark:bg-gray-500/5"
-	>
+	<div class="app-surface rounded-3xl shadow-lg border transition px-1">
 		<!-- Uploaded Files Preview -->
 		{#if attachedUploads.length > 0}
 			<div class="mx-2 pt-2 flex flex-wrap gap-2">
 				{#each attachedUploads as upload}
 					<div class="relative group flex-shrink-0">
 						{#if upload.loading}
-							<div class="flex items-center justify-center size-8 bg-gray-50 dark:bg-white/5 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
+							<div
+								class="app-subtle-surface flex items-center justify-center size-8 rounded-xl border shadow-sm"
+							>
 								<Spinner size={16} />
 							</div>
 						{:else if upload.type === 'image'}
-							<img src={upload.url} alt={upload.name} class="size-8 object-cover rounded-xl border border-gray-200 dark:border-white/10 shadow-sm" />
+							<img
+								src={upload.url}
+								alt={upload.name}
+								class="app-surface size-8 object-cover rounded-xl border shadow-sm"
+							/>
 						{:else}
-							<div class="relative group px-2 w-48 h-8 flex items-center gap-1.5 bg-white dark:bg-[#1a1a1a] border border-gray-100 dark:border-white/5 rounded-xl text-left flex-shrink-0 shadow-sm">
+							<div
+								class="app-surface relative group px-2 w-48 h-8 flex items-center gap-1.5 border rounded-xl text-left flex-shrink-0 shadow-sm"
+							>
 								<div class="shrink-0">
-									<Icon name="page-text" size={14} class="text-gray-500 dark:text-gray-400" />
+									<Icon name="page-text" size={14} class="app-icon-muted" />
 								</div>
 								<div class="flex flex-col justify-center w-full overflow-hidden">
-									<div class="dark:text-gray-100 text-xs flex justify-between items-center w-full gap-2">
+									<div class="text-xs flex justify-between items-center w-full gap-2">
 										<div class="font-medium truncate flex-1">{upload.name}</div>
-										<div class="text-[10px] text-gray-500 capitalize shrink-0">{upload.type === 'file' ? 'File' : upload.type}</div>
+										<div class="app-muted text-[0.625rem] capitalize shrink-0">
+											{upload.type === 'file' ? 'File' : upload.type}
+										</div>
 									</div>
 								</div>
 							</div>
 						{/if}
-						
+
 						<div class="absolute -top-1.5 -right-1.5 z-10">
-							<button 
-								class="bg-white text-black border border-white rounded-full group-hover:visible invisible transition outline-none shadow-sm flex items-center justify-center"
+							<button
+								class="app-surface border rounded-full group-hover:visible invisible transition outline-none shadow-sm flex items-center justify-center"
 								type="button"
 								onclick={() => removeUpload(upload.id)}
 								aria-label={$t('chat.removeUpload')}
 							>
-								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5" aria-hidden="true">
-									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"/>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									class="size-3.5"
+									aria-hidden="true"
+								>
+									<path
+										d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+									/>
 								</svg>
 							</button>
 						</div>
@@ -1139,9 +1275,13 @@
 		<!-- Editor area -->
 		<div class="px-2.5">
 			{#if $voiceModeEnabled}
-				<div class="pt-2 flex items-center gap-2 text-[11px] font-medium text-gray-600 dark:text-gray-300">
+				<div class="app-muted pt-2 flex items-center gap-2 text-[0.6875rem] font-medium">
 					<span class="relative flex size-2">
-						<span class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70 {voiceListening ? 'animate-ping' : ''}"></span>
+						<span
+							class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70 {voiceListening
+								? 'animate-ping'
+								: ''}"
+						></span>
 						<span class="relative inline-flex size-2 rounded-full bg-emerald-500"></span>
 					</span>
 					<span>{voiceStatusLabel}</span>
@@ -1173,8 +1313,9 @@
 				{#if $planMode}
 					<button
 						type="button"
-						class="group p-[5px] flex gap-1 items-center text-xs rounded-full transition-colors duration-150
-						text-gray-600 dark:text-gray-300 bg-gray-50 hover:bg-gray-100 dark:bg-white/8 dark:hover:bg-white/12 border border-gray-200 dark:border-white/8"
+						aria-label={$t('chat.commandPlanOff')}
+						title={$t('chat.commandPlanOff')}
+						class="app-surface app-interactive group p-[0.3125rem] flex gap-1 items-center text-xs rounded-full transition-colors duration-150 border"
 						onclick={() => planMode.set(false)}
 					>
 						<svg
@@ -1232,13 +1373,16 @@
 	/* ── ProseMirror editor ───────────────────────── */
 
 	.chat-editor-mount :global(.chat-prosemirror) {
-		@apply pt-2.5 pb-2 px-1 min-h-6 max-h-96 overflow-y-auto text-[13px] leading-relaxed text-gray-900 dark:text-gray-100 outline-none break-words;
+		@apply pt-2.5 pb-2 px-1 min-h-6 max-h-96 overflow-y-auto text-[0.8125rem] leading-relaxed outline-none break-words;
+		font-size: 0.8125rem;
+		color: var(--app-fg);
 	}
 
 	/* Placeholder */
 	.chat-editor-mount :global(.chat-prosemirror p.is-editor-empty:first-child::before) {
 		content: attr(data-placeholder);
-		@apply float-left text-gray-400 dark:text-gray-600 pointer-events-none h-0;
+		@apply float-left pointer-events-none h-0;
+		color: color-mix(in oklab, var(--app-fg) 48%, var(--app-bg));
 	}
 
 	/* Paragraphs */
@@ -1263,12 +1407,14 @@
 
 	/* Inline code */
 	.chat-editor-mount :global(.chat-prosemirror code) {
-		@apply bg-gray-100 dark:bg-white/8 rounded-sm px-1 py-px text-xs font-mono;
+		@apply rounded-sm px-1 py-px text-xs font-mono;
+		background: color-mix(in oklab, var(--app-fg) 7%, transparent);
 	}
 
 	/* Code blocks */
 	.chat-editor-mount :global(.chat-prosemirror pre) {
-		@apply bg-gray-100 dark:bg-white/4 rounded-md px-3 py-2 overflow-x-auto my-1 text-xs font-mono;
+		@apply rounded-md px-3 py-2 overflow-x-auto my-1 text-xs font-mono;
+		background: color-mix(in oklab, var(--app-fg) 5%, transparent);
 	}
 	.chat-editor-mount :global(.chat-prosemirror pre code) {
 		@apply bg-transparent p-0 rounded-none text-inherit;
@@ -1276,7 +1422,9 @@
 
 	/* Blockquote */
 	.chat-editor-mount :global(.chat-prosemirror blockquote) {
-		@apply my-1 py-0.5 pl-3 border-l-2 border-gray-300 dark:border-white/12 text-gray-500 dark:text-gray-400;
+		@apply my-1 py-0.5 pl-3 border-l-2;
+		border-color: color-mix(in oklab, var(--app-fg) 18%, transparent);
+		color: color-mix(in oklab, var(--app-fg) 62%, var(--app-bg));
 	}
 
 	/* Strong */
@@ -1292,12 +1440,14 @@
 		@apply text-sm font-semibold my-1;
 	}
 	.chat-editor-mount :global(.chat-prosemirror h3) {
-		@apply text-[13px] font-semibold my-1;
+		@apply text-[0.8125rem] font-semibold my-1;
+		font-size: 0.8125rem;
 	}
 
 	/* HR */
 	.chat-editor-mount :global(.chat-prosemirror hr) {
-		@apply border-none border-t border-gray-200 dark:border-white/8 my-2;
+		@apply border-none border-t my-2;
+		border-color: color-mix(in oklab, var(--app-fg) 10%, transparent);
 	}
 
 	/* Syntax highlighting */

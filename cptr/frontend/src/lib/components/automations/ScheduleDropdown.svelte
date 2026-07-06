@@ -14,23 +14,23 @@
 
 	type Frequency = 'ONCE' | 'HOURLY' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'CUSTOM';
 
-	const FREQUENCIES: { key: Frequency; label: string }[] = [
-		{ key: 'ONCE', label: 'Once' },
-		{ key: 'HOURLY', label: 'Hourly' },
-		{ key: 'DAILY', label: 'Daily' },
-		{ key: 'WEEKLY', label: 'Weekly' },
-		{ key: 'MONTHLY', label: 'Monthly' },
-		{ key: 'CUSTOM', label: 'Custom' }
+	const FREQUENCIES: { key: Frequency; labelKey: string }[] = [
+		{ key: 'ONCE', labelKey: 'automations.once' },
+		{ key: 'HOURLY', labelKey: 'automations.hourly' },
+		{ key: 'DAILY', labelKey: 'automations.daily' },
+		{ key: 'WEEKLY', labelKey: 'automations.weekly' },
+		{ key: 'MONTHLY', labelKey: 'automations.monthly' },
+		{ key: 'CUSTOM', labelKey: 'automations.custom' }
 	];
 
 	const DAYS = [
-		{ key: 'MO', label: 'Mo' },
-		{ key: 'TU', label: 'Tu' },
-		{ key: 'WE', label: 'We' },
-		{ key: 'TH', label: 'Th' },
-		{ key: 'FR', label: 'Fr' },
-		{ key: 'SA', label: 'Sa' },
-		{ key: 'SU', label: 'Su' }
+		{ key: 'MO', labelKey: 'automations.dayMo' },
+		{ key: 'TU', labelKey: 'automations.dayTu' },
+		{ key: 'WE', labelKey: 'automations.dayWe' },
+		{ key: 'TH', labelKey: 'automations.dayTh' },
+		{ key: 'FR', labelKey: 'automations.dayFr' },
+		{ key: 'SA', labelKey: 'automations.daySa' },
+		{ key: 'SU', labelKey: 'automations.daySu' }
 	];
 
 	let frequency = $state<Frequency>('DAILY');
@@ -126,19 +126,7 @@
 	}
 
 	let scheduleLabel = $derived(
-		frequency === 'ONCE'
-			? 'Once'
-			: frequency === 'HOURLY'
-				? 'Hourly'
-				: frequency === 'DAILY'
-					? 'Daily'
-					: frequency === 'WEEKLY'
-						? 'Weekly'
-						: frequency === 'MONTHLY'
-							? 'Monthly'
-							: frequency === 'CUSTOM'
-								? 'Custom'
-								: 'Schedule'
+		$t(FREQUENCIES.find((item) => item.key === frequency)?.labelKey ?? 'automations.schedule')
 	);
 </script>
 
@@ -147,13 +135,34 @@
 		bind:this={triggerEl}
 		type="button"
 		class="schedule-trigger"
-		onclick={() => { updatePosition(); showDropdown = !showDropdown; }}
+		onclick={() => {
+			updatePosition();
+			showDropdown = !showDropdown;
+		}}
 	>
-		<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5">
-			<path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			fill="none"
+			viewBox="0 0 24 24"
+			stroke-width="1.5"
+			stroke="currentColor"
+			class="w-3.5 h-3.5"
+		>
+			<path
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+			/>
 		</svg>
 		<span>{scheduleLabel}</span>
-		<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-2.5 h-2.5">
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			fill="none"
+			viewBox="0 0 24 24"
+			stroke-width="2"
+			stroke="currentColor"
+			class="w-2.5 h-2.5"
+		>
 			<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
 		</svg>
 	</button>
@@ -168,7 +177,7 @@
 		style="left:{panelX}px; top:{panelY}px;"
 		onmousedown={(e) => e.stopPropagation()}
 	>
-		<div class="px-2 text-xs text-gray-500 pt-1">Schedule</div>
+		<div class="px-2 text-xs text-gray-500 pt-1">{$t('automations.schedule')}</div>
 
 		<div class="px-1.5 py-0.5">
 			<select
@@ -177,7 +186,7 @@
 				onchange={emitChange}
 			>
 				{#each FREQUENCIES as f}
-					<option value={f.key}>{f.label}</option>
+					<option value={f.key}>{$t(f.labelKey)}</option>
 				{/each}
 			</select>
 		</div>
@@ -211,7 +220,7 @@
 		{:else if frequency !== 'HOURLY'}
 			<div class="flex gap-2 flex-wrap items-center px-3 pb-2 text-xs">
 				<div class="flex items-center gap-1.5">
-					<span class="text-xs text-gray-500 mr-0.5">Time</span>
+					<span class="text-xs text-gray-500 mr-0.5">{$t('automations.time')}</span>
 					<input
 						type="time"
 						value={`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`}
@@ -227,7 +236,7 @@
 
 				{#if frequency === 'MONTHLY'}
 					<div class="flex items-center gap-1.5">
-						<span class="text-xs text-gray-500">Day</span>
+						<span class="text-xs text-gray-500">{$t('automations.day')}</span>
 						<input
 							type="number"
 							bind:value={monthDay}
@@ -250,7 +259,7 @@
 								: 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200'}"
 							onclick={() => toggleDay(d.key)}
 						>
-							{d.label}
+							{$t(d.labelKey)}
 						</button>
 					{/each}
 				</div>
@@ -269,10 +278,10 @@
 	.schedule-trigger {
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		padding: 4px 10px;
-		border-radius: 16px;
-		font-size: 12px;
+		gap: 0.375rem;
+		padding: 0.25rem 0.625rem;
+		border-radius: 1rem;
+		font-size: 0.75rem;
 		color: var(--color-gray-600);
 		transition: background 0.1s;
 	}
@@ -293,13 +302,13 @@
 		position: fixed;
 		z-index: 201;
 		width: 12rem;
-		padding: 4px;
-		border-radius: 16px;
+		padding: 0.25rem;
+		border-radius: 1rem;
 		background: white;
 		border: 1px solid var(--color-gray-200);
 		box-shadow:
-			0 4px 6px -1px rgba(0, 0, 0, 0.1),
-			0 2px 4px -2px rgba(0, 0, 0, 0.1);
+			0 0.25rem 0.375rem -0.0625rem rgba(0, 0, 0, 0.1),
+			0 0.125rem 0.25rem -0.125rem rgba(0, 0, 0, 0.1);
 	}
 
 	:global(.dark) .schedule-panel {

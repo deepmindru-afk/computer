@@ -90,7 +90,7 @@
 			const keyboardInset = Math.max(0, window.innerHeight - visualBottom);
 			document.documentElement.style.setProperty(
 				'--keyboard-inset-bottom',
-				keyboardInset > 100 ? `${keyboardInset}px` : '0px'
+				keyboardInset > 100 ? `${keyboardInset}px` : '0'
 			);
 		};
 
@@ -421,7 +421,10 @@
 
 {#if authState === 'checking'}
 	<!-- Loading spinner while checking auth -->
-	<div class="flex items-center justify-center h-dvh bg-white dark:bg-black">
+	<div
+		class="app-theme flex items-center justify-center h-dvh bg-white dark:bg-black"
+		style="background: var(--app-bg); color: var(--app-fg);"
+	>
 		<Spinner size={20} />
 	</div>
 {:else if authState === 'needs_setup' || authState === 'needs_login'}
@@ -441,14 +444,15 @@
 	/>
 {:else if $stateLoaded}
 	<div
-		class="h-screen max-h-[100dvh] flex overflow-hidden font-sans antialiased text-gray-900 bg-white dark:text-gray-100 dark:bg-black"
+		class="app-theme h-screen max-h-[100dvh] flex overflow-hidden font-sans antialiased text-gray-900 bg-white dark:text-gray-100 dark:bg-black"
+		style="background: var(--app-bg); color: var(--app-fg);"
 	>
 		<Sidebar />
 
 		<div
 			id="main-col"
 			class="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden"
-			style="padding-top: env(safe-area-inset-top, 0px); padding-bottom: var(--keyboard-inset-bottom, 0px);"
+			style="padding-top: env(safe-area-inset-top, 0); padding-bottom: var(--keyboard-inset-bottom, 0);"
 		>
 			{#if !$currentWorkspace && $page.url.pathname === '/'}
 				<Bar />
@@ -483,7 +487,10 @@
 		/>
 	{/if}
 {:else}
-	<div class="flex items-center justify-center h-dvh bg-white dark:bg-black">
+	<div
+		class="app-theme flex items-center justify-center h-dvh bg-white dark:bg-black"
+		style="background: var(--app-bg); color: var(--app-fg);"
+	>
 		<Spinner size={20} />
 	</div>
 {/if}
@@ -494,6 +501,6 @@
 	closeButton
 	richColors
 	toastOptions={{
-		style: 'font-size: 12px; font-family: var(--font-sans); border-radius: 8px;'
+		style: 'font-size: 0.75rem; font-family: var(--font-sans); border-radius: 0.5rem;'
 	}}
 />

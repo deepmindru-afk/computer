@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { t } from '$lib/i18n';
+
 	let { code }: { code: string } = $props();
 
 	let containerEl: HTMLDivElement | undefined = $state();
@@ -27,7 +29,7 @@
 					rendered = true;
 				}
 			} catch (e: any) {
-				error = e.message || 'Failed to render diagram';
+				error = e.message || $t('preview.diagramRenderError');
 			}
 		})();
 	});
@@ -36,7 +38,7 @@
 <div class="mermaid-block">
 	{#if error}
 		<div class="mermaid-error">
-			<span class="mermaid-error-label">Diagram error</span>
+			<span class="mermaid-error-label">{$t('preview.diagramError')}</span>
 			<pre class="mermaid-error-msg">{error}</pre>
 			<pre class="mermaid-source">{code}</pre>
 		</div>
@@ -49,8 +51,8 @@
 	@reference "../../../app.css";
 
 	.mermaid-block {
-		margin: 0 0 12px;
-		border-radius: 8px;
+		margin: 0 0 0.75rem;
+		border-radius: 0.5rem;
 		overflow: hidden;
 		border: 1px solid var(--color-gray-200);
 	}
@@ -62,7 +64,7 @@
 	.mermaid-container {
 		display: flex;
 		justify-content: center;
-		padding: 16px;
+		padding: 1rem;
 		background: var(--color-gray-50);
 		overflow-x: auto;
 	}
@@ -77,19 +79,19 @@
 	}
 
 	.mermaid-error {
-		padding: 12px 16px;
+		padding: 0.75rem 1rem;
 		background: rgba(220, 38, 38, 0.04);
 	}
 
 	.mermaid-error-label {
-		font-size: 11px;
+		font-size: 0.6875rem;
 		font-weight: 500;
 		color: #dc2626;
 	}
 
 	.mermaid-error-msg {
-		margin: 4px 0 8px;
-		font-size: 12px;
+		margin: 0.25rem 0 0.5rem;
+		font-size: 0.75rem;
 		color: #dc2626;
 		white-space: pre-wrap;
 		font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
@@ -97,10 +99,10 @@
 
 	.mermaid-source {
 		margin: 0;
-		padding: 8px 12px;
-		font-size: 12px;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.75rem;
 		background: var(--color-gray-100);
-		border-radius: 4px;
+		border-radius: 0.25rem;
 		color: var(--color-gray-600);
 		font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 	}

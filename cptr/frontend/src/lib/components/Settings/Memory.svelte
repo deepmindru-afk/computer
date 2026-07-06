@@ -3,6 +3,7 @@
 	import { toast } from 'svelte-sonner';
 	import ToggleSwitch from '$lib/components/common/ToggleSwitch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import { t } from '$lib/i18n';
 	import { currentWorkspace } from '$lib/stores';
 	import {
 		getMemory,
@@ -31,7 +32,7 @@
 			userEntries = state.user.entries;
 			userUsage = state.user.usage;
 		} catch {
-			toast.error('Failed to load memory');
+			toast.error($t('memory.failedToLoad'));
 		} finally {
 			loading = false;
 		}
@@ -43,9 +44,9 @@
 		try {
 			const result = await updateMemorySettings(settings);
 			settings = result.settings;
-			toast.success('Saved');
+			toast.success($t('settings.saved'));
 		} catch {
-			toast.error('Failed to save memory settings');
+			toast.error($t('memory.failedToSaveSettings'));
 		} finally {
 			saving = false;
 		}
@@ -56,7 +57,7 @@
 			await updateMemory('user', workspace, [{ action: 'remove', old_text: entry.slice(0, 120) }]);
 			await load();
 		} catch {
-			toast.error('Failed to update memory');
+			toast.error($t('memory.failedToUpdate'));
 		}
 	}
 </script>
@@ -66,12 +67,14 @@
 		<div class="flex justify-center py-8"><Spinner size={16} /></div>
 	{:else}
 		<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5 -mr-1.5">
-			<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">Memory</h2>
+			<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">
+				{$t('settings.memory')}
+			</h2>
 
-			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2">Behavior</h3>
+			<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2">{$t('memory.behavior')}</h3>
 			<div class="flex flex-col gap-2.5">
 				<label class="flex items-center justify-between cursor-pointer">
-					<span class="text-xs text-gray-600 dark:text-gray-400">Enable memory</span>
+					<span class="text-xs text-gray-600 dark:text-gray-400">{$t('memory.enable')}</span>
 					<ToggleSwitch
 						value={settings.enabled}
 						onchange={(v) => (settings = { ...settings!, enabled: v })}
@@ -80,7 +83,9 @@
 
 				{#if settings.enabled}
 					<label class="flex items-center justify-between cursor-pointer">
-						<span class="text-xs text-gray-600 dark:text-gray-400">Assistant can save memories</span>
+						<span class="text-xs text-gray-600 dark:text-gray-400"
+							>{$t('memory.assistantCanSave')}</span
+						>
 						<ToggleSwitch
 							value={settings.tool_enabled}
 							onchange={(v) => (settings = { ...settings!, tool_enabled: v })}
@@ -88,7 +93,9 @@
 					</label>
 
 					<label class="flex items-center justify-between cursor-pointer">
-						<span class="text-xs text-gray-600 dark:text-gray-400">Background review</span>
+						<span class="text-xs text-gray-600 dark:text-gray-400"
+							>{$t('memory.backgroundReview')}</span
+						>
 						<ToggleSwitch
 							value={settings.background_review_enabled}
 							onchange={(v) => (settings = { ...settings!, background_review_enabled: v })}
@@ -98,11 +105,11 @@
 			</div>
 
 			{#if settings.enabled}
-				<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">Limits</h3>
+				<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">{$t('memory.limits')}</h3>
 				<div class="flex flex-col gap-2.5">
 					<div>
 						<label class="text-xs text-gray-600 dark:text-gray-400" for="memory-review-interval">
-							Review every
+							{$t('memory.reviewEvery')}
 						</label>
 						<input
 							id="memory-review-interval"
@@ -114,7 +121,7 @@
 					</div>
 					<div>
 						<label class="text-xs text-gray-600 dark:text-gray-400" for="memory-user-limit">
-							User limit
+							{$t('memory.userLimit')}
 						</label>
 						<input
 							id="memory-user-limit"
@@ -127,22 +134,26 @@
 				</div>
 
 				{#if userEntries.length > 0}
-					<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">User Memory</h3>
+					<h3 class="text-xs text-gray-400 dark:text-gray-600 mb-2 mt-5">
+						{$t('memory.userMemory')}
+					</h3>
 					<div class="flex flex-col gap-2.5">
 						{#each userEntries as entry}
 							<div class="flex items-start justify-between gap-3">
-								<div class="min-w-0 whitespace-pre-wrap break-words text-xs text-gray-600 dark:text-gray-400">
+								<div
+									class="min-w-0 whitespace-pre-wrap break-words text-xs text-gray-600 dark:text-gray-400"
+								>
 									{entry}
 								</div>
 								<button
 									class="shrink-0 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
 									onclick={() => removeUserMemoryEntry(entry)}
 								>
-									Remove
+									{$t('common.remove')}
 								</button>
 							</div>
 						{/each}
-						<p class="text-[11px] text-gray-400 dark:text-gray-600 -mt-1">{userUsage}</p>
+						<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600 -mt-1">{userUsage}</p>
 					</div>
 				{/if}
 			{/if}
@@ -150,11 +161,11 @@
 
 		<div class="shrink-0 pt-3 flex justify-end">
 			<button
-				class="text-[13px] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100 disabled:opacity-50"
+				class="text-[0.8125rem] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-100 disabled:opacity-50"
 				onclick={saveSettings}
 				disabled={saving}
 			>
-				{saving ? 'Saving' : 'Save'}
+				{saving ? $t('settings.saving') : $t('settings.save')}
 			</button>
 		</div>
 	{/if}

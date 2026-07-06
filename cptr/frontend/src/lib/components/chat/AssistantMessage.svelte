@@ -3,11 +3,14 @@
 	import { get } from 'svelte/store';
 	import MarkdownRenderer from '$lib/components/markdown/MarkdownRenderer.svelte';
 	import OutputEditView from './OutputEditView.svelte';
+	import ChatFilePreview from './ChatFilePreview.svelte';
 	import ConsecutiveActivityGroup from './ConsecutiveActivityGroup.svelte';
 	import ReasoningCollapsible from './ReasoningCollapsible.svelte';
 	import ToolCallCollapsible from './ToolCallCollapsible.svelte';
 	import { currentWorkspace, openFileTab } from '$lib/stores';
 	import { ttsConfigured, ttsEnabled } from '$lib/stores/audio';
+	import { tooltip } from '$lib/tooltip';
+	import { fileIconName } from '$lib/utils/fileIcon';
 	import Icon from '../Icon.svelte';
 	import { t } from '$lib/i18n';
 
@@ -49,6 +52,7 @@
 	let editedOutput = $state<any[] | null>(null);
 	let copied = $state(false);
 	let showUsageTooltip = $state(false);
+	let collapsedFiles = $state<Record<string, boolean>>({});
 	let textareaEl: HTMLTextAreaElement;
 
 	async function startEdit() {
@@ -138,6 +142,17 @@
 		return parts[parts.length - 1];
 	}
 
+	function resolvedFilePath(file: any): string {
+		const path = String(file?.full_path || file?.path || '');
+		if (!path || path.startsWith('/')) return path;
+		const workspace = file?.workspace || get(currentWorkspace)?.path || '';
+		return workspace ? `${workspace.replace(/\/$/, '')}/${path.replace(/^\/+/, '')}` : path;
+	}
+
+	function toggleFile(key: string) {
+		collapsedFiles = { ...collapsedFiles, [key]: !collapsedFiles[key] };
+	}
+
 	/** Human-readable label for a tool call */
 	function toolLabel(name: string, args: any): string {
 		const _t = $t;
@@ -159,6 +174,8 @@
 				return _t('chat.tool.createFile', { path: shortPath(args.path) });
 			case 'write_file':
 				return _t('chat.tool.writeFile', { path: shortPath(args.path) });
+			case 'display_file':
+				return `Display ${shortPath(args.path)}`;
 			case 'list_directory':
 				return args.recursive
 					? _t('chat.tool.listDirectoryRecursive', { path: shortPath(args.path) })
@@ -234,7 +251,13 @@
 		item: any;
 	}
 
-	type DisplayItem = ActivityGroup | MessageItem | ArtifactItem | ImageItem;
+	interface FileItem {
+		type: 'file_item';
+		item: any;
+		index: number;
+	}
+
+	type DisplayItem = ActivityGroup | MessageItem | ArtifactItem | ImageItem | FileItem;
 
 	const outputText = $derived.by((): string => {
 		return (output || [])
@@ -313,7 +336,7 @@
 			}
 		};
 
-		for (const item of output) {
+		for (const [index, item] of output.entries()) {
 			if (item.type === 'function_call') {
 				ensureGroup();
 				currentGroup!.entries.push(item);
@@ -335,6 +358,9 @@
 			} else if (item.type === 'image') {
 				flushGroup();
 				items.push({ type: 'image_item', item });
+			} else if (item.type === 'file') {
+				flushGroup();
+				items.push({ type: 'file_item', item, index });
 			}
 			// function_call_output items are handled via outputMap, skip standalone render
 		}
@@ -365,9 +391,7 @@
 	{#if edit}
 		<!-- Edit mode -->
 		<div class="w-full">
-			<div
-				class="bg-gray-50 dark:bg-white/4 rounded-xl border border-gray-200 dark:border-white/8 px-3.5 py-2.5"
-			>
+			<div class="app-subtle-surface rounded-xl border px-3.5 py-2.5">
 				{#if editedOutput}
 					<OutputEditView
 						output={editedOutput}
@@ -379,14 +403,14 @@
 					<textarea
 						bind:this={textareaEl}
 						bind:value={editedContent}
-						class="w-full bg-transparent outline-none resize-none text-[13px] leading-relaxed text-gray-900 dark:text-gray-200"
+						class="w-full bg-transparent outline-none resize-none text-[0.8125rem] leading-relaxed text-gray-900 dark:text-gray-200"
 						oninput={autoResize}
 						onkeydown={handleKeydown}
 						rows="1"
 					></textarea>
 				{/if}
 			</div>
-			<div class="flex justify-between mt-2 text-[12px] font-medium">
+			<div class="flex justify-between mt-2 text-[0.75rem] font-medium">
 				<button
 					class="px-3 py-1 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
 					onclick={saveAsCopy}>{$t('chat.saveAs')}</button
@@ -408,7 +432,7 @@
 		<div>
 			{#if !done && (!output || output.length === 0)}
 				<MarkdownRenderer {content} /><span
-					class="inline-block w-[2px] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
+					class="inline-block w-[0.125rem] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
 				></span>
 			{:else}
 				{#if done && displayItems.length === 0 && content}
@@ -428,7 +452,7 @@
 						border border-gray-200 dark:border-white/8
 						hover:border-gray-300 dark:hover:border-white/12
 						hover:bg-gray-50/50 dark:hover:bg-white/[0.03]
-						transition-colors duration-150 {preview ? 'h-[70px]' : 'h-[38px]'}"
+						transition-colors duration-150 {preview ? 'h-[4.375rem]' : 'h-[2.375rem]'}"
 							onclick={() => {
 								const ws = get(currentWorkspace);
 								if (ws && artifact.path) {
@@ -446,7 +470,7 @@
 								{#if preview}
 									<div class="h-8 overflow-hidden">
 										<div
-											class="line-clamp-2 break-words text-[10px] leading-4 font-normal text-gray-400 dark:text-gray-500"
+											class="line-clamp-2 break-words text-[0.625rem] leading-4 font-normal text-gray-400 dark:text-gray-500"
 										>
 											{preview}
 										</div>
@@ -470,6 +494,53 @@
 									/>
 								</a>
 							{/each}
+						</div>
+					{:else if displayItem.type === 'file_item'}
+						{@const file = displayItem.item}
+						{@const filePath = resolvedFilePath(file)}
+						{@const fileKey = filePath || file.path || `file-${displayItem.index}`}
+						{@const collapsed = Boolean(collapsedFiles[fileKey])}
+						<div
+							class="my-2 w-full max-w-2xl overflow-hidden rounded-md border border-gray-200 bg-white dark:border-white/8 dark:bg-gray-950/20"
+						>
+							<div
+								class="flex h-8 items-center {collapsed
+									? ''
+									: 'border-b border-gray-100 dark:border-white/8'}"
+							>
+								<button
+									type="button"
+									class="flex h-full min-w-0 flex-1 items-center gap-2 px-2.5 text-left"
+									onclick={() => toggleFile(fileKey)}
+									aria-expanded={!collapsed}
+								>
+									<div
+										class="flex size-5 shrink-0 items-center justify-center text-gray-500 dark:text-gray-400"
+									>
+										<Icon name={fileIconName(file.name || file.path || '', 'file')} size={14} />
+									</div>
+									<div
+										class="min-w-0 flex-1 truncate text-xs font-medium text-gray-800 dark:text-gray-100"
+									>
+										{file.name || shortPath(file.path)}
+									</div>
+								</button>
+								<button
+									type="button"
+									class="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
+									onclick={(event) => {
+										event.stopPropagation();
+										if (filePath) openFileTab(filePath);
+									}}
+									aria-label={$t('directory.open', { name: file.name || shortPath(file.path) })}
+									use:tooltip={'Open as tab'}
+								>
+									<Icon name="external-link" size={13} />
+								</button>
+							</div>
+							{#if !collapsed}
+								<ChatFilePreview {file} {filePath} />
+							{/if}
 						</div>
 					{:else if displayItem.type === 'activity_group'}
 						{#if displayItem.entries.length === 1}
@@ -514,7 +585,7 @@
 						<MarkdownRenderer content={leftoverText} />
 					{/if}
 					<span
-						class="inline-block w-[2px] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
+						class="inline-block w-[0.125rem] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
 					></span>
 				{/if}
 			{/if}
@@ -539,7 +610,7 @@
 							/></svg
 						>
 					</button>
-					<span class="text-[11px] tabular-nums text-gray-400 dark:text-gray-600 select-none"
+					<span class="text-[0.6875rem] tabular-nums text-gray-400 dark:text-gray-600 select-none"
 						>{siblingIndex + 1}/{siblingTotal}</span
 					>
 					<button
@@ -672,9 +743,9 @@
 							<div
 								class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50
 									bg-gray-900 dark:bg-gray-800 text-gray-100 dark:text-gray-100
-									rounded-lg shadow-lg px-2.5 py-1.5 text-[10px] font-mono
+									rounded-lg shadow-lg px-2.5 py-1.5 text-[0.625rem] font-mono
 									whitespace-nowrap pointer-events-none
-									min-w-[160px] border border-transparent dark:border-gray-700"
+									min-w-[10rem] border border-transparent dark:border-gray-700"
 							>
 								<div class="space-y-0.5">
 									{#each Object.entries(usage) as [key, value]}
@@ -689,9 +760,9 @@
 								<!-- Arrow -->
 								<div
 									class="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0
-									border-l-[5px] border-l-transparent
-									border-r-[5px] border-r-transparent
-									border-t-[5px] border-t-gray-900 dark:border-t-gray-800"
+									border-l-[0.3125rem] border-l-transparent
+									border-r-[0.3125rem] border-r-transparent
+									border-t-[0.3125rem] border-t-gray-900 dark:border-t-gray-800"
 								></div>
 							</div>
 						{/if}

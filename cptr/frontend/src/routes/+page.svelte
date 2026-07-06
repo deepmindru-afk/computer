@@ -9,8 +9,7 @@
 		gitReviewOpen,
 		setActiveGroup,
 		setSplitRatio,
-		openTabInSplit,
-		setSplitDirection,
+		moveTabToNewSplit,
 		openChatTab,
 		openFileTab,
 		openTerminalTab,
@@ -20,7 +19,7 @@
 		showSearch,
 		pwaPreferences
 	} from '$lib/stores';
-	import type { Tab, EditorGroup, WorkspaceState } from '$lib/stores';
+	import type { Tab, EditorGroup, SplitDirection, WorkspaceState } from '$lib/stores';
 	import { t } from '$lib/i18n';
 	import { get } from 'svelte/store';
 	import { getWelcome, getWorkspaceState } from '$lib/apis/state';
@@ -40,6 +39,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import WorkspacePicker from '$lib/components/WorkspacePicker.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import { TAB_DRAG_MIME } from '$lib/constants';
 	import { isSupportedWorkspacePath } from '$lib/utils/paths';
 
 	let showPicker = $state(false);
@@ -540,14 +540,15 @@
 	function resumeSignals(resume: WorkspaceResume | undefined): string[] {
 		if (!resume) return [];
 		const signals: string[] = [];
-		if (resume.terminalCount) signals.push(`${resume.terminalCount} term`);
+		if (resume.terminalCount)
+			signals.push($t('home.terminalShort', { count: resume.terminalCount }));
 		if (resume.previewPorts.length)
 			signals.push(resume.previewPorts.map((port) => `:${port}`).join(', '));
 		if (resume.chatCount || resume.activeChatCount) {
 			signals.push(
 				resume.activeChatCount
-					? `${resume.activeChatCount} active chat${resume.activeChatCount === 1 ? '' : 's'}`
-					: `${resume.chatCount} chat${resume.chatCount === 1 ? '' : 's'}`
+					? $t('home.activeChat', { count: resume.activeChatCount })
+					: $t('home.chat', { count: resume.chatCount })
 			);
 		}
 		return signals;
@@ -638,27 +639,78 @@
 
 	// ── Drag-to-split ─────────────────────────────────────────────
 
-	let dragOverZone = $state<'right' | 'bottom' | null>(null);
+	const SPLIT_EDGE_FRACTION = 0.3;
+
+	type SplitDropZone = 'left' | 'right' | 'top' | 'bottom';
+	type TabDragPayload = { tabId: string; groupId: string };
+
+	let dragOverZone = $state<SplitDropZone | null>(null);
+
+	function hasTabDrag(dataTransfer: DataTransfer): boolean {
+		return dataTransfer.types.includes(TAB_DRAG_MIME) || dataTransfer.types.includes('text/tab-id');
+	}
+
+	function readTabDragPayload(dataTransfer: DataTransfer): TabDragPayload | null {
+		const raw = dataTransfer.getData(TAB_DRAG_MIME);
+		if (raw) {
+			try {
+				const parsed = JSON.parse(raw) as Partial<TabDragPayload>;
+				if (typeof parsed.tabId === 'string' && typeof parsed.groupId === 'string') {
+					return { tabId: parsed.tabId, groupId: parsed.groupId };
+				}
+			} catch {
+				// Fall through to the legacy payload below.
+			}
+		}
+
+		const tabId = dataTransfer.getData('text/tab-id');
+		const groupId = dataTransfer.getData('text/group-id');
+		return tabId && groupId ? { tabId, groupId } : null;
+	}
+
+	function getSplitDropZone(e: DragEvent): SplitDropZone | null {
+		if (!containerEl || !isWideScreen || hasSplit || !e.dataTransfer) return null;
+		if (e.dataTransfer.types.includes('Files') || !hasTabDrag(e.dataTransfer)) return null;
+
+		const rect = containerEl.getBoundingClientRect();
+		if (
+			e.clientX < rect.left ||
+			e.clientX > rect.right ||
+			e.clientY < rect.top ||
+			e.clientY > rect.bottom
+		) {
+			return null;
+		}
+
+		const horizontalBand = rect.width * SPLIT_EDGE_FRACTION;
+		const verticalBand = rect.height * SPLIT_EDGE_FRACTION;
+		const leftDistance = e.clientX - rect.left;
+		const rightDistance = rect.right - e.clientX;
+		const topDistance = e.clientY - rect.top;
+		const bottomDistance = rect.bottom - e.clientY;
+		const candidates: { zone: SplitDropZone; distance: number }[] = [];
+
+		if (leftDistance <= horizontalBand) candidates.push({ zone: 'left', distance: leftDistance });
+		if (rightDistance <= horizontalBand)
+			candidates.push({ zone: 'right', distance: rightDistance });
+		if (topDistance <= verticalBand) candidates.push({ zone: 'top', distance: topDistance });
+		if (bottomDistance <= verticalBand)
+			candidates.push({ zone: 'bottom', distance: bottomDistance });
+
+		candidates.sort((a, b) => a.distance - b.distance);
+		return candidates[0]?.zone ?? null;
+	}
 
 	function handleContainerDragOver(e: DragEvent) {
-		if (!containerEl || !isWideScreen) return;
-		// Only respond to tab drags, not file uploads
-		if (!e.dataTransfer?.types.includes('text/tab-id')) return;
-		// Only show drop zones when not already split
-		if (hasSplit) return;
+		const zone = getSplitDropZone(e);
+		if (!zone) {
+			dragOverZone = null;
+			return;
+		}
 
 		e.preventDefault();
-		const rect = containerEl.getBoundingClientRect();
-		const xRatio = (e.clientX - rect.left) / rect.width;
-		const yRatio = (e.clientY - rect.top) / rect.height;
-
-		if (xRatio > 0.75) {
-			dragOverZone = 'right';
-		} else if (yRatio > 0.75) {
-			dragOverZone = 'bottom';
-		} else {
-			dragOverZone = null;
-		}
+		e.dataTransfer!.dropEffect = 'move';
+		dragOverZone = zone;
 	}
 
 	function handleContainerDragLeave(e: DragEvent) {
@@ -669,36 +721,24 @@
 	}
 
 	function handleContainerDrop(e: DragEvent) {
-		if (!dragOverZone || !e.dataTransfer) {
-			dragOverZone = null;
-			return;
-		}
-		// Don't intercept file uploads
-		if (e.dataTransfer.types.includes('Files')) {
+		const zone = dragOverZone ?? getSplitDropZone(e);
+
+		if (!zone || !e.dataTransfer) {
 			dragOverZone = null;
 			return;
 		}
 
-		const tabId = e.dataTransfer.getData('text/tab-id');
-		const fromGroupId = e.dataTransfer.getData('text/group-id');
-		if (!tabId || !fromGroupId) {
+		const payload = readTabDragPayload(e.dataTransfer);
+		if (!payload) {
 			dragOverZone = null;
 			return;
 		}
 
 		e.preventDefault();
-		const direction = dragOverZone === 'right' ? 'horizontal' : 'vertical';
-		setSplitDirection(direction as any);
-
-		// Move the dragged tab into a new split pane
-		const ws = $currentWorkspace;
-		if (ws) {
-			const sourceGroup = ws.groups.find((g) => g.id === fromGroupId);
-			const tab = sourceGroup?.tabs.find((t) => t.id === tabId);
-			if (tab) {
-				openTabInSplit(tabId, direction as any);
-			}
-		}
+		const direction: SplitDirection =
+			zone === 'left' || zone === 'right' ? 'horizontal' : 'vertical';
+		const placement = zone === 'left' || zone === 'top' ? 'before' : 'after';
+		moveTabToNewSplit(payload.tabId, payload.groupId, direction, placement);
 		dragOverZone = null;
 	}
 </script>
@@ -714,7 +754,7 @@
 					{#if $appVersion}
 						<button
 							onclick={() => showChangelog.set(true)}
-							class="cursor-pointer font-mono text-[11px] text-gray-400 hover:text-gray-500 hover:underline dark:text-gray-600 dark:hover:text-gray-400"
+							class="cursor-pointer font-mono text-[0.6875rem] text-gray-400 hover:text-gray-500 hover:underline dark:text-gray-600 dark:hover:text-gray-400"
 						>
 							v{$appVersion}
 						</button>
@@ -730,38 +770,38 @@
 			<div class="mb-6">
 				<h2 class="mb-2 text-xs text-gray-400 dark:text-gray-600">{$t('home.start')}</h2>
 				<button
-					class="text-[13px] text-gray-600 transition-colors duration-100 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+					class="text-[0.8125rem] text-gray-600 transition-colors duration-100 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
 					onclick={() => (showPicker = true)}
 				>
-					Open workspace
+					{$t('home.openWorkspace')}
 				</button>
 			</div>
 
 			{#if continuation}
 				<div class="mb-6">
-					<h2 class="mb-2 text-xs text-gray-400 dark:text-gray-600">Continue</h2>
+					<h2 class="mb-2 text-xs text-gray-400 dark:text-gray-600">{$t('home.continue')}</h2>
 					<button
 						class="group w-full min-w-0 py-1.5 text-left transition-colors duration-100"
 						onclick={() => quickOpen(continuation.path)}
 					>
 						<span class="flex min-w-0 items-baseline gap-2">
 							<span
-								class="truncate text-[13px] text-gray-800 group-hover:text-gray-950 dark:text-gray-200 dark:group-hover:text-white"
+								class="truncate text-[0.8125rem] text-gray-800 group-hover:text-gray-950 dark:text-gray-200 dark:group-hover:text-white"
 							>
 								{continuation.name}
 							</span>
-							<span class="truncate font-mono text-[11px] text-gray-400 dark:text-gray-600">
+							<span class="truncate font-mono text-[0.6875rem] text-gray-400 dark:text-gray-600">
 								{shortenPath(continuation.path)}
 							</span>
 						</span>
 						{#if continueSignals.length}
 							<span
-								class="mt-0.5 block truncate font-mono text-[10px] text-gray-400 dark:text-gray-600"
+								class="mt-0.5 block truncate font-mono text-[0.625rem] text-gray-400 dark:text-gray-600"
 							>
 								{continueSignals.join('  ')}
 							</span>
 						{:else if continueResume?.activeLabels.length}
-							<span class="mt-0.5 block truncate text-[11px] text-gray-400 dark:text-gray-600">
+							<span class="mt-0.5 block truncate text-[0.6875rem] text-gray-400 dark:text-gray-600">
 								{continueResume.activeLabels.join(' · ')}
 							</span>
 						{/if}
@@ -782,22 +822,26 @@
 							>
 								<span class="flex min-w-0 items-baseline gap-2">
 									<span
-										class="truncate text-[13px] text-gray-700 group-hover:text-gray-900 dark:text-gray-300 dark:group-hover:text-white"
+										class="truncate text-[0.8125rem] text-gray-700 group-hover:text-gray-900 dark:text-gray-300 dark:group-hover:text-white"
 									>
 										{item.name}
 									</span>
-									<span class="truncate font-mono text-[11px] text-gray-400 dark:text-gray-600">
+									<span
+										class="truncate font-mono text-[0.6875rem] text-gray-400 dark:text-gray-600"
+									>
 										{shortenPath(item.path)}
 									</span>
 								</span>
 								{#if signals.length}
 									<span
-										class="mt-0.5 block truncate font-mono text-[10px] text-gray-400 dark:text-gray-600"
+										class="mt-0.5 block truncate font-mono text-[0.625rem] text-gray-400 dark:text-gray-600"
 									>
 										{signals.join('  ')}
 									</span>
 								{:else if resume?.activeLabels.length}
-									<span class="mt-0.5 block truncate text-[11px] text-gray-400 dark:text-gray-600">
+									<span
+										class="mt-0.5 block truncate text-[0.6875rem] text-gray-400 dark:text-gray-600"
+									>
 										{resume.activeLabels.join(' · ')}
 									</span>
 								{/if}
@@ -809,10 +853,10 @@
 				<div class="mb-6">
 					<h2 class="mb-2 text-xs text-gray-400 dark:text-gray-600">{$t('home.recent')}</h2>
 					<button
-						class="text-[13px] text-gray-500 transition-colors duration-100 hover:text-gray-900 dark:text-gray-500 dark:hover:text-white"
+						class="text-[0.8125rem] text-gray-500 transition-colors duration-100 hover:text-gray-900 dark:text-gray-500 dark:hover:text-white"
 						onclick={() => (showPicker = true)}
 					>
-						No workspaces yet
+						{$t('home.noWorkspaces')}
 					</button>
 				</div>
 			{/if}
@@ -823,7 +867,7 @@
 					<div class="flex flex-col">
 						{#each nearby as item}
 							<button
-								class="flex min-w-0 items-center gap-2 py-1.5 text-left text-[13px] text-gray-600 transition-colors duration-100 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+								class="flex min-w-0 items-center gap-2 py-1.5 text-left text-[0.8125rem] text-gray-600 transition-colors duration-100 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
 								onclick={() => quickOpen(item.path)}
 							>
 								<Icon
@@ -833,7 +877,7 @@
 									class="shrink-0 text-gray-400 dark:text-gray-600"
 								/>
 								<span class="truncate">{item.name}</span>
-								<span class="truncate font-mono text-[11px] text-gray-400 dark:text-gray-600">
+								<span class="truncate font-mono text-[0.6875rem] text-gray-400 dark:text-gray-600">
 									{shortenPath(item.path)}
 								</span>
 							</button>
@@ -878,6 +922,7 @@
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="split-pane"
+				class:split-pane-single={!hasSplit}
 				style={hasSplit
 					? splitDirection === 'horizontal'
 						? `width: ${i === 0 ? splitRatio * 100 : (1 - splitRatio) * 100}%;`
@@ -938,8 +983,14 @@
 		{/each}
 
 		<!-- Drop zone indicators for drag-to-split -->
+		{#if dragOverZone === 'left'}
+			<div class="split-drop-zone split-drop-left"></div>
+		{/if}
 		{#if dragOverZone === 'right'}
 			<div class="split-drop-zone split-drop-right"></div>
+		{/if}
+		{#if dragOverZone === 'top'}
+			<div class="split-drop-zone split-drop-top"></div>
 		{/if}
 		{#if dragOverZone === 'bottom'}
 			<div class="split-drop-zone split-drop-bottom"></div>
@@ -977,6 +1028,8 @@
 		height: 100%;
 		position: relative;
 		overflow: hidden;
+		background: var(--app-bg);
+		color: var(--app-fg);
 	}
 
 	.split-horizontal {
@@ -996,8 +1049,8 @@
 		min-height: 0;
 	}
 
-	/* Single pane takes all space */
-	.split-pane:only-child {
+	/* Single pane takes all space even while preview overlays are mounted. */
+	.split-pane-single {
 		flex: 1;
 		width: 100%;
 		height: 100%;
@@ -1009,6 +1062,8 @@
 		min-width: 0;
 		overflow: hidden;
 		position: relative;
+		background: var(--app-bg);
+		color: var(--app-fg);
 	}
 
 	/* ── Divider ─────────────────────────────────────────────── */
@@ -1023,12 +1078,12 @@
 	}
 
 	.split-divider-h {
-		width: 6px;
+		width: 0.375rem;
 		cursor: col-resize;
 	}
 
 	.split-divider-v {
-		height: 6px;
+		height: 0.375rem;
 		cursor: row-resize;
 	}
 
@@ -1088,24 +1143,43 @@
 	.split-drop-zone {
 		position: absolute;
 		z-index: 15;
-		background: oklch(0.65 0.15 250 / 0.08);
-		border: 2px dashed oklch(0.65 0.15 250 / 0.3);
-		border-radius: 8px;
+		display: block;
+		flex: none;
+		contain: layout paint;
 		pointer-events: none;
+		--split-tabbar-height: 2.25rem;
+		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--app-fg) 16%, transparent);
+	}
+
+	.split-drop-left,
+	.split-drop-right {
+		top: var(--split-tabbar-height);
+		bottom: 0;
+		width: 50%;
+	}
+
+	.split-drop-left {
+		left: 0;
 	}
 
 	.split-drop-right {
-		top: 8px;
-		right: 8px;
-		bottom: 8px;
-		width: 45%;
+		right: 0;
+	}
+
+	.split-drop-top,
+	.split-drop-bottom {
+		left: 0;
+		right: 0;
+		height: calc((100% - var(--split-tabbar-height)) / 2);
+	}
+
+	.split-drop-top {
+		top: var(--split-tabbar-height);
 	}
 
 	.split-drop-bottom {
-		left: 8px;
-		right: 8px;
-		bottom: 8px;
-		height: 45%;
+		bottom: 0;
 	}
 
 	/* ── Persisted file editor tabs ────────────────────── */

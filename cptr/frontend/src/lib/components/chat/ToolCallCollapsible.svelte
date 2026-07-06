@@ -38,7 +38,14 @@
 			return null;
 		}
 	});
-
+	const formattedOutput = $derived.by(() => {
+		if (!pairedOutput?.output) return '';
+		try {
+			return JSON.stringify(JSON.parse(pairedOutput.output), null, 2);
+		} catch {
+			return pairedOutput.output;
+		}
+	});
 	function toggleExpanded() {
 		expanded = !expanded;
 	}
@@ -148,7 +155,7 @@
 			{#if isPending && chatId}
 				<span class="flex gap-1 shrink-0">
 					<button
-						class="text-[11px] px-2.5 py-0.5 rounded-md
+						class="text-[0.6875rem] px-2.5 py-0.5 rounded-md
 						text-gray-600 dark:text-gray-300
 						bg-gray-100 dark:bg-white/8
 						hover:bg-gray-200 dark:hover:bg-white/12
@@ -159,7 +166,7 @@
 						}}>{$t('chat.allow')}</button
 					>
 					<button
-						class="text-[11px] px-2 py-0.5 rounded-md
+						class="text-[0.6875rem] px-2 py-0.5 rounded-md
 						text-gray-400 dark:text-gray-500
 						hover:text-gray-600 dark:hover:text-gray-300
 						transition-colors duration-100"
@@ -170,7 +177,7 @@
 					>
 				</span>
 			{:else}
-				<div class="flex shrink-0 self-center translate-y-[1px]">
+				<div class="flex shrink-0 items-center gap-1 self-center">
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
 						fill="none"
@@ -196,13 +203,13 @@
 				{#if Object.keys(args).length > 0}
 					<div>
 						<div
-							class="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5 px-1"
+							class="text-[0.625rem] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5 px-1"
 						>
 							{$t('chat.toolInput')}
 						</div>
 						{#if toolName === 'edit_file' && args.target}
 							<div
-								class="text-[11px] font-mono rounded-lg overflow-hidden border border-gray-200/60 dark:border-white/6"
+								class="text-[0.6875rem] font-mono rounded-lg overflow-hidden border border-gray-200/60 dark:border-white/6"
 							>
 								<div
 									class="bg-red-50/80 dark:bg-red-950/20 text-red-700 dark:text-red-400 px-2.5 py-1 whitespace-pre-wrap break-all leading-relaxed"
@@ -223,7 +230,7 @@
 								</div>
 							</div>
 							{#if args.start_line}
-								<div class="text-[10px] text-gray-400 dark:text-gray-600 mt-1 px-1">
+								<div class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-1 px-1">
 									{$t('chat.toolLines', {
 										start: args.start_line,
 										end: args.end_line || 'end'
@@ -240,8 +247,8 @@
 								{#each Object.entries(args) as [key, value]}
 									<div class="flex gap-2 text-xs py-0.5">
 										<span class="text-gray-600 dark:text-gray-400 shrink-0">{key}</span>
-										<span class="text-gray-800 dark:text-gray-200 break-all">
-											{typeof value === 'object' ? JSON.stringify(value) : value}
+										<span class="text-gray-800 dark:text-gray-200 break-all whitespace-pre-wrap">
+											{typeof value === 'object' ? JSON.stringify(value, null, 2) : value}
 										</span>
 									</div>
 								{/each}
@@ -253,7 +260,7 @@
 				{#if pairedOutput?.output}
 					<div>
 						<div
-							class="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5 px-1"
+							class="text-[0.625rem] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5 px-1"
 						>
 							{$t('chat.toolOutput')}
 						</div>
@@ -268,15 +275,15 @@
 								</div>
 							{:else}
 								<pre
-									class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words font-mono max-h-64 overflow-auto leading-relaxed">{pairedOutput
-										.output.length > 10000
-										? pairedOutput.output.slice(0, 10000)
-										: pairedOutput.output}</pre>
+									class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words font-mono max-h-64 overflow-auto leading-relaxed">{formattedOutput.length >
+									10000
+										? formattedOutput.slice(0, 10000)
+										: formattedOutput}</pre>
 							{/if}
-							{#if !imageToolOutput?.length && pairedOutput.output.length > 10000}
-								<div class="text-[10px] text-gray-400 dark:text-gray-600 mt-1 px-1">
+							{#if !imageToolOutput?.length && formattedOutput.length > 10000}
+								<div class="text-[0.625rem] text-gray-400 dark:text-gray-600 mt-1 px-1">
 									{$t('chat.totalChars', {
-										count: pairedOutput.output.length.toLocaleString()
+										count: formattedOutput.length.toLocaleString()
 									})}
 								</div>
 							{/if}
