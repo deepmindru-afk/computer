@@ -28,6 +28,7 @@
 	const menuItems = $derived(
 		filtered.map((m) => ({
 			label: m.name,
+			tooltip: m.name,
 			active: m.id === selectedModel,
 			check: true,
 			onclick: () => {
@@ -100,7 +101,7 @@
 			{preferAbove}
 			forceAbove={preferAbove}
 			maxHeight={selectorMaxHeight}
-			className="w-48"
+			className="w-52"
 			{align}
 		>
 			{#snippet header()}

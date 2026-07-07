@@ -14,7 +14,13 @@ import uuid
 from cptr.events import EVENTS, publish_event
 from cptr.env import CHAT_MAX_ITERATIONS, CHAT_TOOL_COMMAND_MAX_CHARS, CHAT_TOOL_MAX_CHARS
 from cptr.utils.context import resolve_compact_token_threshold, should_compact
-from cptr.utils.skills import discover_skills, load_skill, format_skill_content
+from cptr.utils.skills import (
+    bump_skill_view,
+    discover_skills,
+    format_skill_content,
+    get_skill_settings,
+    load_skill,
+)
 from cptr.utils.summarize import summarize_messages
 from cptr.models import Chat, ChatMessage, Config
 from cptr.socket.main import emit_to_user
@@ -27,7 +33,15 @@ from cptr.utils.ai import (
 )
 from cptr.utils.config import _get_jwt_secret, now_ms
 from cptr.utils.crypto import decrypt_key
-from cptr.utils.tools import ALL_TOOLS, execute_tool, get_tool_list, _fn_to_schema, create_artifact
+from cptr.utils.tools import (
+    ALL_TOOLS,
+    clear_active_tasks,
+    create_artifact,
+    disabled_builtin_tool_names,
+    execute_tool,
+    get_tool_list,
+    _fn_to_schema,
+)
 from cptr.utils.chat_export import export_chat_to_file
 from cptr.utils.json_parser import extract_json
 from cptr.utils.prompt_templates import load_system_prompt as _load_system_prompt
@@ -51,6 +65,27 @@ PLAN_MODE_PROMPT = (
 )
 
 SKILLS_CREATE_RE = re.compile(r"^/skills:create(?:\s+(.*))?$", re.IGNORECASE | re.DOTALL)
+
+
+def resolve_builtin_tools_config(
+    chat_models_config: dict | None, *model_ids: str | None
+) -> dict | None:
+    """Merge global/model builtin tool group config. Missing/null means default."""
+    if not isinstance(chat_models_config, dict):
+        return None
+    merged: dict = {}
+    found = False
+    for model_id in ("*", *[m for m in model_ids if m]):
+        model_config = chat_models_config.get(model_id)
+        if not isinstance(model_config, dict):
+            continue
+        params = model_config.get("params", {})
+        value = params.get("builtin_tools") if isinstance(params, dict) else None
+        if isinstance(value, dict):
+            merged.update(value)
+            found = True
+    return merged if found else None
+
 
 COMPUTER_SKILL_AUTHORING_STANDARDS = """\
 Follow the Computer skill-authoring standards:
@@ -135,7 +170,46 @@ def _build_skill_create_prompt(user_request: str) -> str:
     )
 
 
-def _apply_skills_create_prompt(messages: list[dict]) -> bool:
+def _message_has_real_content(message: dict) -> bool:
+    text = _plain_message_text(message.get("content")).strip()
+    return bool(
+        text or message.get("tool_calls") or message.get("reasoning_items") or message.get("output")
+    )
+
+
+def _has_prior_real_chat_content(messages: list[dict], loaded_summary: str | None = None) -> bool:
+    if loaded_summary and loaded_summary.strip():
+        return True
+    last_user_idx = next(
+        (idx for idx in range(len(messages) - 1, -1, -1) if messages[idx].get("role") == "user"),
+        len(messages),
+    )
+    return any(
+        message.get("role") == "user" and _message_has_real_content(message)
+        for message in messages[:last_user_idx]
+    )
+
+
+def _build_skill_create_gate_prompt(reason: str = "empty_chat") -> str:
+    if reason == "disabled":
+        return (
+            "[/skills:create] Skill creation is disabled in admin settings. "
+            "Explain this briefly and do not try to create or update a skill."
+        )
+    return (
+        "[/skills:create] The user tried to create a skill before this chat had "
+        "any prior real content. Explain briefly that skill creation needs an "
+        "existing chat with the workflow or source material already in it, then "
+        "ask them to continue in a chat with content first."
+    )
+
+
+def _apply_skills_create_prompt(
+    messages: list[dict],
+    *,
+    allowed: bool,
+    denial_reason: str = "empty_chat",
+) -> bool:
     for message in reversed(messages):
         if message.get("role") != "user":
             continue
@@ -143,7 +217,11 @@ def _apply_skills_create_prompt(messages: list[dict]) -> bool:
         match = SKILLS_CREATE_RE.match(text.strip())
         if not match:
             return False
-        message["content"] = _build_skill_create_prompt(match.group(1) or "")
+        message["content"] = (
+            _build_skill_create_prompt(match.group(1) or "")
+            if allowed
+            else _build_skill_create_gate_prompt(denial_reason)
+        )
         return True
     return False
 
@@ -1261,6 +1339,10 @@ async def run_chat_task(
             title = "Chat"
         preview = content[:300] if content else ""
         ws_name = workspace.rstrip("/").rsplit("/", 1)[-1] if workspace else ""
+        try:
+            await clear_active_tasks(chat_id, user_id, message_id)
+        except Exception:
+            logger.debug("[task %s] clear_active_tasks failed", message_id[:8], exc_info=True)
         await emit(
             done=True,
             title=title,
@@ -1283,6 +1365,16 @@ async def run_chat_task(
     content = (msg.content or "") if msg else ""
     output_items: list[dict] = list(msg.output or []) if msg else []
     text_buffer = ""  # Accumulates text between tool calls
+    task_completed_success = False
+    review_messages: list[dict] = []
+    review_model_connection: dict | None = None
+    review_model_name = ""
+    review_chat_params: dict = {}
+    review_builtin_tools: dict | None = None
+    loaded_skill_names: set[str] = set()
+    tool_names_used: set[str] = set()
+    skill_create_requested = False
+    skill_authoring_allowed = False
 
     logger.info(
         "[task %s] start: existing content=%d chars, output=%d items",
@@ -1359,7 +1451,8 @@ async def run_chat_task(
         await Chat.update_meta(chat_id, meta, now_ms())
 
     async def _run_agent_target(agent_target: AgentModelTarget):
-        nonlocal content, text_buffer
+        nonlocal content, text_buffer, task_completed_success, skill_authoring_allowed
+        nonlocal skill_create_requested
         from cptr.utils.agents.claude_code import run_claude_code_agent
         from cptr.utils.agents.cline import run_cline_agent
         from cptr.utils.agents.codex import run_codex_agent
@@ -1370,7 +1463,15 @@ async def run_chat_task(
         chat_obj = await Chat.get_by_id(chat_id)
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
         messages, loaded_summary = await _load_message_history(chat_id, message_id)
-        _apply_skills_create_prompt(messages)
+        skill_settings = await get_skill_settings()
+        skill_authoring_allowed = _has_prior_real_chat_content(messages, loaded_summary)
+        skill_create_denial_reason = "empty_chat"
+        if not skill_settings["enabled"] or not skill_settings["tool_enabled"]:
+            skill_authoring_allowed = False
+            skill_create_denial_reason = "disabled"
+        skill_create_requested = _apply_skills_create_prompt(
+            messages, allowed=skill_authoring_allowed, denial_reason=skill_create_denial_reason
+        )
         memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
         system = await _load_system_prompt(
             workspace,
@@ -1421,6 +1522,24 @@ async def run_chat_task(
         if runner is None:
             raise RuntimeError(f"Unsupported agent type: {agent_target.agent}")
         reasoning_buffer = ""
+        reasoning_item_id = f"reasoning-{message_id}"
+
+        async def _finish_reasoning_item():
+            existing = next(
+                (item for item in output_items if item.get("id") == reasoning_item_id), None
+            )
+            if not existing or existing.get("status") == "completed":
+                return
+            item = {
+                "type": "reasoning",
+                "id": reasoning_item_id,
+                "status": "completed",
+                "content": [{"type": "reasoning_text", "text": reasoning_buffer}],
+            }
+            _upsert_output_item(output_items, item)
+            await emit(output=item)
+            _sync_state()
+
         async for event in runner(
             profile=agent_target.config,
             model=agent_target.model,
@@ -1432,6 +1551,7 @@ async def run_chat_task(
             attachments=agent_attachments,
         ):
             if isinstance(event, AgentTextDelta):
+                await _finish_reasoning_item()
                 content += event.text
                 text_buffer += event.text
                 await emit(delta=event.text)
@@ -1440,7 +1560,7 @@ async def run_chat_task(
                 reasoning_buffer += event.text
                 item = {
                     "type": "reasoning",
-                    "id": f"reasoning-{message_id}",
+                    "id": reasoning_item_id,
                     "status": "in_progress",
                     "content": [{"type": "reasoning_text", "text": reasoning_buffer}],
                 }
@@ -1448,6 +1568,7 @@ async def run_chat_task(
                 await emit(output=item)
                 _sync_state()
             elif isinstance(event, AgentToolUpdate):
+                await _finish_reasoning_item()
                 flushed_item = _flush_text()
                 if flushed_item:
                     await emit(output=flushed_item)
@@ -1508,6 +1629,7 @@ async def run_chat_task(
                     await emit(output=output_item)
                 _sync_state()
             elif isinstance(event, AgentToolOutputDelta):
+                await _finish_reasoning_item()
                 flushed_item = _flush_text()
                 if flushed_item:
                     await emit(output=flushed_item)
@@ -1564,16 +1686,7 @@ async def run_chat_task(
             elif isinstance(event, AgentError):
                 raise RuntimeError(event.message)
             elif isinstance(event, AgentDone):
-                if reasoning_buffer:
-                    _upsert_output_item(
-                        output_items,
-                        {
-                            "type": "reasoning",
-                            "id": f"reasoning-{message_id}",
-                            "status": "completed",
-                            "content": [{"type": "reasoning_text", "text": reasoning_buffer}],
-                        },
-                    )
+                await _finish_reasoning_item()
                 flushed_item = _flush_text()
                 if flushed_item:
                     await emit(output=flushed_item)
@@ -1597,11 +1710,13 @@ async def run_chat_task(
                     data={"workspace": event_workspace, "preview": preview},
                     message=preview,
                 )
+                task_completed_success = True
                 return
 
         flushed_item = _flush_text()
         if flushed_item:
             await emit(output=flushed_item)
+        await _finish_reasoning_item()
         await _save_message("agent stream ended", content=content, output=output_items, done=True)
         _task_state.pop(message_id, None)
         await _emit_done()
@@ -1631,8 +1746,21 @@ async def run_chat_task(
         chat_obj = await Chat.get_by_id(chat_id)
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
         configured_model = (msg.model if msg else None) or model
+        try:
+            chat_models_config = await Config.get("chat.models") or {}
+        except Exception:
+            chat_models_config = {}
+        builtin_tools = resolve_builtin_tools_config(chat_models_config, model, configured_model)
         messages, loaded_summary = await _load_message_history(chat_id, message_id)
-        _apply_skills_create_prompt(messages)
+        skill_settings = await get_skill_settings()
+        skill_authoring_allowed = _has_prior_real_chat_content(messages, loaded_summary)
+        skill_create_denial_reason = "empty_chat"
+        if not skill_settings["enabled"] or not skill_settings["tool_enabled"]:
+            skill_authoring_allowed = False
+            skill_create_denial_reason = "disabled"
+        skill_create_requested = _apply_skills_create_prompt(
+            messages, allowed=skill_authoring_allowed, denial_reason=skill_create_denial_reason
+        )
         memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
         system = await _load_system_prompt(
             workspace,
@@ -1646,10 +1774,12 @@ async def run_chat_task(
             system += f"\n\n[CONVERSATION SUMMARY]\n{loaded_summary}"
         if regeneration_prompt:
             messages.append({"role": "user", "content": regeneration_prompt})
-        tools = await get_tool_list()
+        tools = await get_tool_list(builtin_tools=builtin_tools)
+        if not skill_authoring_allowed:
+            tools = [t for t in tools if t["name"] != "manage_skill"]
 
         # Remove view_skill tool if no skills are available
-        skills = discover_skills(workspace)
+        skills = discover_skills(workspace) if skill_settings["enabled"] else []
         if not skills:
             tools = [t for t in tools if t["name"] != "view_skill"]
 
@@ -1680,6 +1810,8 @@ async def run_chat_task(
                 if skill:
                     skill_blocks.append(format_skill_content(skill))
                     _activated_skills.add(sid)  # mark as activated for dedup
+                    loaded_skill_names.add(sid)
+                    bump_skill_view(workspace, sid, skill.source)
             if skill_blocks:
                 system += "\n\n" + "\n\n".join(skill_blocks)
 
@@ -1696,6 +1828,14 @@ async def run_chat_task(
             logger.info(
                 "[task %s] plan mode active, %d tools available", message_id[:8], len(tools)
             )
+        review_messages = messages
+        review_model_connection = connection
+        review_model_name = model
+        review_chat_params = {
+            **chat_params,
+            "subagent": bool(chat_obj and (chat_obj.meta or {}).get("subagent")),
+        }
+        review_builtin_tools = builtin_tools
 
         # Tool approval mode: 'ask' | 'auto' | 'full'
         #   ask  = require approval for ALL tools (including reads)
@@ -1715,15 +1855,17 @@ async def run_chat_task(
         global_rp = {}
         model_rp = {}
         compact_token_threshold = None
-        try:
-            chat_models_config = await Config.get("chat.models") or {}
-            global_rp = chat_models_config.get("*", {}).get("params", {}).get("request_params", {})
-            model_rp = chat_models_config.get(model, {}).get("params", {}).get("request_params", {})
-            compact_token_threshold = resolve_compact_token_threshold(
-                configured_model, chat_models_config=chat_models_config
-            )
-        except Exception:
-            pass
+        global_params = chat_models_config.get("*", {}).get("params", {})
+        if not isinstance(global_params, dict):
+            global_params = {}
+        model_params = chat_models_config.get(model, {}).get("params", {})
+        if not isinstance(model_params, dict):
+            model_params = {}
+        global_rp = global_params.get("request_params") or {}
+        model_rp = model_params.get("request_params") or {}
+        compact_token_threshold = resolve_compact_token_threshold(
+            configured_model, chat_models_config=chat_models_config
+        )
         compact_token_threshold = compact_token_threshold or resolve_compact_token_threshold()
         request_params = {**global_rp, **model_rp, **chat_request_params} or None
 
@@ -1920,6 +2062,7 @@ async def run_chat_task(
                             data={"workspace": event_workspace, "preview": preview},
                             message=preview,
                         )
+                        task_completed_success = True
                         return
 
             # ── Process collected tool calls ────────────────────
@@ -1941,12 +2084,18 @@ async def run_chat_task(
                     "chat_id": chat_id,
                     "message_id": message_id,
                     "connection": connection,
+                    "builtin_tools": builtin_tools,
                 }
 
                 # Check if any call needs approval
                 needs_approval = None
                 for tc in pending_calls:
                     name = tc["name"]
+                    tool_names_used.add(name)
+                    if name == "view_skill":
+                        skill_name = str(tc.get("arguments", {}).get("skill_name") or "").strip()
+                        if skill_name:
+                            loaded_skill_names.add(skill_name)
                     tool = ALL_TOOLS.get(name)
                     should_auto = approval_mode == "full" or (
                         approval_mode == "auto" and tool and tool["auto"]
@@ -2150,6 +2299,7 @@ async def run_chat_task(
                     data={"workspace": event_workspace, "preview": preview},
                     message=preview,
                 )
+                task_completed_success = True
                 return
 
         # Max iterations reached
@@ -2280,6 +2430,26 @@ async def run_chat_task(
             )
         except Exception:
             logger.debug("[memory] Failed to review conversation", exc_info=True)
+        try:
+            from cptr.utils.skills import review_skills_after_turn
+
+            await review_skills_after_turn(
+                workspace=workspace,
+                conversation_messages=review_messages,
+                assistant_reply=content,
+                model_connection=review_model_connection,
+                model=review_model_name,
+                loaded_skill_names=loaded_skill_names,
+                tool_names=tool_names_used,
+                skill_create_requested=skill_create_requested,
+                plan_mode=bool(review_chat_params.get("plan_mode")),
+                subagent=bool(review_chat_params.get("subagent")),
+                skills_enabled=task_completed_success
+                and skill_authoring_allowed
+                and "manage_skill" not in disabled_builtin_tool_names(review_builtin_tools),
+            )
+        except Exception:
+            logger.debug("[skills] Failed to review conversation", exc_info=True)
         # Process any pending user prompts or internal subagent results.
         try:
             await process_pending_chat_inputs(chat_id, user_id, workspace)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import json
 import logging
 from pathlib import Path
@@ -56,26 +57,31 @@ async def list_chats(
     if not chats_dir.exists():
         return {"chats": [], "total": 0, "has_more": False}
 
-    # Scan filesystem for chat JSON files in a thread
+    # Scan filesystem for chat files.
     def _scan_chat_files() -> list[dict]:
-        entries = []
+        chat_files = []
         for json_file in chats_dir.rglob("*.json"):
             chat_id = json_file.stem
             rel_folder = str(json_file.parent.relative_to(chats_dir))
             if rel_folder == ".":
                 rel_folder = ""
-            entries.append({"id": chat_id, "folder": rel_folder})
-        return entries
+            chat_files.append(
+                {
+                    "chat_id": chat_id,
+                    "folder": rel_folder,
+                    "path": json_file,
+                }
+            )
+        return chat_files
 
-    chat_entries = await asyncio.to_thread(_scan_chat_files)
+    chat_files = await asyncio.to_thread(_scan_chat_files)
 
-    if not chat_entries:
+    if not chat_files:
         return {"chats": [], "total": 0, "has_more": False}
 
     # Batch-fetch from DB
-    chat_ids = [e["id"] for e in chat_entries]
-    chats = await Chat.get_by_ids(chat_ids)
-    chat_map = {c.id: c for c in chats}
+    db_chats = await Chat.get_by_ids([chat_file["chat_id"] for chat_file in chat_files])
+    chat_by_id = {chat.id: chat for chat in db_chats}
 
     # Detect which chats have a running task (in-memory check, no DB hit)
     from cptr.utils.chat_task import get_active_chat_ids
@@ -83,31 +89,130 @@ async def list_chats(
     active_ids = get_active_chat_ids()
 
     # Build response: only include chats owned by this user
-    result = []
-    for entry in chat_entries:
-        chat = chat_map.get(entry["id"])
-        if chat and chat.user_id == user_id:
-            result.append(
-                {
-                    "id": chat.id,
-                    "title": chat.title,
-                    "summary": chat.summary,
-                    "folder": entry["folder"],
-                    "meta": chat.meta,
-                    "current_message_id": chat.current_message_id,
-                    "created_at": chat.created_at,
-                    "updated_at": chat.updated_at,
-                    "is_active": chat.id in active_ids,
-                }
+    visible_chats = []
+    for chat_file in chat_files:
+        chat = chat_by_id.get(chat_file["chat_id"])
+        if not chat or chat.user_id != user_id:
+            continue
+
+        chat_meta = chat.meta if isinstance(chat.meta, dict) else {}
+        if chat.meta is not None and not isinstance(chat.meta, dict):
+            log.warning(
+                "chat.list.bad_meta workspace=%r chat_id=%s title=%r meta_type=%s",
+                workspace,
+                chat.id,
+                chat.title,
+                type(chat.meta).__name__,
             )
+
+        chat_file_updated_at = None
+        listing_updated_at = chat.updated_at or chat.created_at or 0
+        if not chat.updated_at:
+            try:
+                chat_file_data = json.loads(chat_file["path"].read_text())
+                chat_file_updated_at = chat_file_data.get("updated_at")
+                if isinstance(chat_file_updated_at, int):
+                    listing_updated_at = max(listing_updated_at, chat_file_updated_at)
+            except Exception as exc:
+                log.warning(
+                    "chat.list.file_read_error workspace=%r chat_id=%s path=%s error=%s: %s",
+                    workspace,
+                    chat.id,
+                    chat_file["path"],
+                    type(exc).__name__,
+                    exc,
+                )
+            log.warning(
+                "chat.list.timestamp_anomaly workspace=%r chat_id=%s title=%r db_updated_at=%r chat_file_updated_at=%r created_at=%r listing_updated_at=%r",
+                workspace,
+                chat.id,
+                chat.title,
+                chat.updated_at,
+                chat_file_updated_at,
+                chat.created_at,
+                listing_updated_at,
+            )
+
+        stored_tasks = chat_meta.get("tasks")
+        if stored_tasks is not None:
+            malformed_task_count = 0
+            unfinished_task_count = 0
+            task_status_counts: dict[str, int] = {}
+            if isinstance(stored_tasks, list):
+                for task in stored_tasks:
+                    if not isinstance(task, dict):
+                        malformed_task_count += 1
+                        continue
+                    status = str(task.get("status", "pending"))
+                    task_status_counts[status] = task_status_counts.get(status, 0) + 1
+                    if status in {"pending", "in_progress"}:
+                        unfinished_task_count += 1
+                    if not task.get("id") or not task.get("content"):
+                        malformed_task_count += 1
+            else:
+                malformed_task_count += 1
+            if unfinished_task_count or malformed_task_count:
+                log.warning(
+                    "chat.list.task_state_anomaly workspace=%r chat_id=%s title=%r db_updated_at=%r chat_file_updated_at=%r current_message_id=%r task_type=%s task_count=%s unfinished=%d malformed=%d statuses=%r",
+                    workspace,
+                    chat.id,
+                    chat.title,
+                    chat.updated_at,
+                    chat_file_updated_at,
+                    chat.current_message_id,
+                    type(stored_tasks).__name__,
+                    len(stored_tasks) if isinstance(stored_tasks, list) else "n/a",
+                    unfinished_task_count,
+                    malformed_task_count,
+                    task_status_counts,
+                )
+
+        chat_list_meta = dict(chat_meta)
+        chat_list_meta.pop("tasks", None)
+        visible_chats.append(
+            {
+                "id": chat.id,
+                "title": chat.title,
+                "summary": chat.summary,
+                "folder": chat_file["folder"],
+                "meta": chat_list_meta,
+                "current_message_id": chat.current_message_id,
+                "created_at": chat.created_at,
+                "updated_at": listing_updated_at,
+                "is_active": chat.id in active_ids,
+            }
+        )
 
     # Sort by requested field
     sort_field = sort_by if sort_by in ("title", "updated_at") else "updated_at"
     reverse = sort_dir != "asc"
-    result.sort(key=lambda c: c[sort_field] or "", reverse=reverse)
-    total = len(result)
-    page = result[offset : offset + limit]
-    return {"chats": page, "total": total, "has_more": offset + limit < total}
+    if sort_field == "updated_at":
+        visible_chats.sort(
+            key=lambda c: c["updated_at"] if isinstance(c["updated_at"], int) else 0,
+            reverse=reverse,
+        )
+    else:
+        visible_chats.sort(key=lambda c: str(c["title"] or ""), reverse=reverse)
+    total_chats = len(visible_chats)
+    chat_page = visible_chats[offset : offset + limit]
+    log.info(
+        "chat.list workspace=%r chat_file_count=%d db_chat_count=%d visible_count=%d limit=%d offset=%d sort=%s/%s page_count=%d has_more=%s",
+        workspace,
+        len(chat_files),
+        len(db_chats),
+        total_chats,
+        limit,
+        offset,
+        sort_field,
+        sort_dir,
+        len(chat_page),
+        offset + limit < total_chats,
+    )
+    return {
+        "chats": chat_page,
+        "total": total_chats,
+        "has_more": offset + limit < total_chats,
+    }
 
 
 # ── Models aggregation ──────────────────────────────────────
@@ -271,6 +376,9 @@ async def get_chat(
 
     messages = await ChatMessage.get_all_by_chat(chat_id)
     context_usage = await _get_chat_context_usage(chat, model_id)
+    from cptr.utils.tools import _normalize_tasks
+
+    tasks = _normalize_tasks((chat.meta or {}).get("tasks"))
     return {
         "chat": {
             "id": chat.id,
@@ -282,6 +390,7 @@ async def get_chat(
             "updated_at": chat.updated_at,
         },
         "messages": [_message_dict(m) for m in messages],
+        "tasks": tasks,
         "context_usage": context_usage,
     }
 
@@ -396,14 +505,87 @@ async def delete_chat(chat_id: str, request: Request):
     if not chat or chat.user_id != user_id:
         raise HTTPException(404, "chat not found")
 
-    # Remove .cptr/chats/{id}.json marker
+    # Remove the workspace chat file.
     workspace = chat.meta.get("workspace", "") if chat.meta else ""
     if workspace:
-        marker = Path(workspace) / ".cptr" / "chats" / f"{chat_id}.json"
-        await asyncio.to_thread(marker.unlink, True)  # missing_ok=True
+        chat_file = Path(workspace) / ".cptr" / "chats" / f"{chat_id}.json"
+        await asyncio.to_thread(chat_file.unlink, True)  # missing_ok=True
 
     await Chat.delete(chat_id)
     return {"ok": True}
+
+
+class ForkChatRequest(BaseModel):
+    message_id: Optional[str] = None
+
+
+@router.post("/{chat_id}/fork")
+async def fork_chat(chat_id: str, request: Request, body: ForkChatRequest | None = None):
+    """Clone a completed chat branch through the selected message."""
+    user_id = _get_user(request)
+    chat = await Chat.get_by_id(chat_id)
+    if not chat or chat.user_id != user_id:
+        raise HTTPException(404, "chat not found")
+    if await _chat_has_active_generation(chat_id):
+        raise HTTPException(409, "wait for the current response to finish before forking")
+
+    messages = await ChatMessage.get_all_by_chat(chat_id)
+    if not messages:
+        raise HTTPException(400, "chat has no messages to fork")
+    message_by_id = {message.id: message for message in messages}
+    source_message_id = (body.message_id if body else None) or chat.current_message_id or messages[-1].id
+    source_message = message_by_id.get(source_message_id)
+    if not source_message:
+        raise HTTPException(404, "message not found")
+
+    branch: list[ChatMessage] = []
+    seen: set[str] = set()
+    current: ChatMessage | None = source_message
+    while current:
+        if current.id in seen:
+            raise HTTPException(400, "message branch contains a cycle")
+        seen.add(current.id)
+        branch.append(current)
+        current = message_by_id.get(current.parent_id) if current.parent_id else None
+    branch.reverse()
+
+    meta = deepcopy(chat.meta or {})
+    meta["forked_from"] = chat.id
+    meta["forked_from_message_id"] = source_message.id
+    now = now_ms()
+    fork = await Chat.create(
+        user_id=user_id,
+        title=f"{chat.title} (fork)",
+        meta=meta,
+        created_at=now,
+    )
+    if chat.summary:
+        await Chat.update_summary(fork.id, chat.summary, now)
+
+    id_map: dict[str, str] = {}
+    for message in branch:
+        copied = await ChatMessage.create(
+            chat_id=fork.id,
+            role=message.role,
+            content=message.content,
+            parent_id=id_map.get(message.parent_id) if message.parent_id else None,
+            model=message.model,
+            done=message.done,
+            output=deepcopy(message.output),
+            usage=deepcopy(message.usage),
+            meta=deepcopy(message.meta),
+            created_at=message.created_at,
+        )
+        id_map[message.id] = copied.id
+        if message.chat_summary:
+            await ChatMessage.update(copied.id, chat_summary=message.chat_summary)
+
+    await Chat.update_current_message(fork.id, id_map[source_message.id], now)
+
+    from cptr.utils.chat_export import export_chat_to_file
+
+    await export_chat_to_file(fork.id)
+    return {"ok": True, "chat_id": fork.id}
 
 
 # ── Send a message ──────────────────────────────────────────
@@ -577,7 +759,11 @@ async def compact_chat(chat_id: str, body: CompactRequest, request: Request):
         usage = await _get_chat_context_usage(chat, body.model_id)
         return {"ok": True, "compacted": False, "reason": "too_short", "context_usage": usage}
 
-    from cptr.utils.model_targets import ApiModelTarget, first_api_model_target, resolve_model_target
+    from cptr.utils.model_targets import (
+        ApiModelTarget,
+        first_api_model_target,
+        resolve_model_target,
+    )
 
     target = await resolve_model_target(body.model_id, request.app.state)
     if not isinstance(target, ApiModelTarget):

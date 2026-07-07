@@ -9,11 +9,11 @@
 	import PWA from './Settings/PWA.svelte';
 	import Account from './Settings/Account.svelte';
 	import Keyboard from './Settings/Keyboard.svelte';
-	import About from './Settings/About.svelte';
 	import Users from './Admin/Users.svelte';
 	import Connections from './Admin/Connections.svelte';
 	import Agents from './Admin/Agents.svelte';
 	import Models from './Admin/Models.svelte';
+	import Skills from './Admin/Skills.svelte';
 	import Messaging from './Admin/Messaging.svelte';
 	import Gateway from './Admin/Gateway.svelte';
 	import AudioSettings from './Admin/AudioSettings.svelte';
@@ -32,11 +32,11 @@
 		| 'pwa'
 		| 'keyboard'
 		| 'account'
-		| 'about'
 		| 'users'
 		| 'connections'
 		| 'agents'
 		| 'models'
+		| 'skills'
 		| 'messaging'
 		| 'gateway'
 		| 'audio'
@@ -71,7 +71,8 @@
 		'web',
 		'toolservers',
 		'subagents',
-		'memory'
+		'memory',
+		'skills'
 	];
 
 	const personalTabs: SettingsTab[] = $derived.by(() => {
@@ -83,7 +84,6 @@
 			{ id: 'account', label: $t('settings.account'), icon: 'user' }
 		];
 		if (showPwaSettings) tabs.push({ id: 'pwa', label: 'PWA', icon: 'phone' });
-		tabs.push({ id: 'about', label: $t('settings.about'), icon: 'info' });
 		return tabs;
 	});
 
@@ -99,7 +99,8 @@
 		{ id: 'web', label: $t('admin.web'), icon: 'globe' },
 		{ id: 'toolservers', label: $t('admin.toolServers'), icon: 'plug' },
 		{ id: 'subagents', label: $t('admin.subagents'), icon: 'user' },
-		{ id: 'memory', label: $t('settings.memory'), icon: 'brain' }
+		{ id: 'memory', label: $t('settings.memory'), icon: 'brain' },
+		{ id: 'skills', label: 'Skills', icon: 'spark' }
 	]);
 
 	onMount(() => {
@@ -180,7 +181,7 @@
 
 	<div class="flex-1 overflow-y-auto scrollbar-none min-h-0 p-4 md:px-5">
 		{#if activeTab === 'general'}
-			<General />
+			<General {showPwaSettings} />
 		{:else if activeTab === 'notifications'}
 			<Notifications />
 		{:else if activeTab === 'appearance'}
@@ -193,8 +194,6 @@
 			<Keyboard />
 		{:else if activeTab === 'account'}
 			<Account />
-		{:else if activeTab === 'about'}
-			<About />
 		{:else if activeTab === 'users'}
 			<Users />
 		{:else if activeTab === 'connections'}
@@ -203,6 +202,8 @@
 			<Agents />
 		{:else if activeTab === 'models'}
 			<Models />
+		{:else if activeTab === 'skills'}
+			<Skills />
 		{:else if activeTab === 'messaging'}
 			<Messaging />
 		{:else if activeTab === 'gateway'}

@@ -1,13 +1,16 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import Icon from '../Icon.svelte';
+	import MessageTimestamp from './MessageTimestamp.svelte';
 	import { fileIconName } from '$lib/utils/fileIcon';
 	import { openFileTab, setFileBrowserCwd, setActiveTab } from '$lib/stores';
+	import { tooltip } from '$lib/tooltip';
 	import { t } from '$lib/i18n';
 
 	interface Props {
 		content: string;
 		meta?: Record<string, any> | null;
+		createdAt?: number | null;
 		siblingIndex?: number;
 		siblingTotal?: number;
 		onedit?: (content: string, submit: boolean) => void;
@@ -16,6 +19,7 @@
 	let {
 		content,
 		meta = null,
+		createdAt = null,
 		siblingIndex = 0,
 		siblingTotal = 1,
 		onedit,
@@ -240,13 +244,17 @@
 			</div>
 		</div>
 		{#if siblingTotal > 1 || onedit}
-			<div class="flex justify-end items-center gap-1 mt-0.5 invisible group-hover:visible">
+			<div
+				class="group/timestamp-toolbar flex w-full justify-end items-center gap-1 mt-1 invisible group-hover:visible"
+			>
+				<MessageTimestamp {createdAt} side="left" />
 				{#if siblingTotal > 1}
 					<button
 						class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30 disabled:cursor-default transition-colors duration-100"
 						disabled={siblingIndex === 0}
 						onclick={() => onnavigate?.(-1)}
 						aria-label={$t('chat.prevMessage')}
+						use:tooltip={$t('chat.prevMessage')}
 					>
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
 							><path
@@ -265,6 +273,7 @@
 						disabled={siblingIndex === siblingTotal - 1}
 						onclick={() => onnavigate?.(1)}
 						aria-label={$t('chat.nextMessage')}
+						use:tooltip={$t('chat.nextMessage')}
 					>
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
 							><path
@@ -281,6 +290,7 @@
 						class="p-1 rounded-md text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
 						onclick={startEdit}
 						aria-label={$t('chat.editMessage')}
+						use:tooltip={$t('chat.editMessage')}
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -302,6 +312,7 @@
 					class="p-1 rounded-md text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
 					onclick={copyContent}
 					aria-label={$t('chat.copyMessage')}
+					use:tooltip={copied ? $t('about.copied') : $t('chat.copyMessage')}
 				>
 					{#if copied}
 						<svg

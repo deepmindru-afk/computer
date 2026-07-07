@@ -7,6 +7,7 @@ import os
 import shlex
 from typing import Any, AsyncIterator
 
+from cptr.env import CLAUDE_CODE_MAX_BUFFER_SIZE
 from cptr.utils.agents.attachments import PreparedAgentAttachments
 from cptr.utils.agents.events import (
     AgentDone,
@@ -128,6 +129,7 @@ async def run_claude_code_agent(
             "permission_mode": permission_mode,
             "env": env,
             "include_partial_messages": True,
+            "max_buffer_size": CLAUDE_CODE_MAX_BUFFER_SIZE,
         }
         if workspace:
             options_kwargs["cwd"] = workspace
@@ -158,6 +160,8 @@ async def run_claude_code_agent(
             usage: dict[str, Any] | None = None
             observed_session_id = session_id
             tool_calls: dict[int, AgentToolUpdate] = {}
+            received_text_delta = False
+            received_thinking_delta = False
 
             async for message in stream:
                 event = getattr(message, "event", None)
@@ -169,11 +173,17 @@ async def run_claude_code_agent(
                             if delta.get("type") == "text_delta" and isinstance(
                                 delta.get("text"), str
                             ):
-                                yield AgentTextDelta(delta["text"])
+                                text = delta["text"]
+                                if text:
+                                    received_text_delta = True
+                                    yield AgentTextDelta(text)
                             elif delta.get("type") == "thinking_delta" and isinstance(
                                 delta.get("thinking"), str
                             ):
-                                yield AgentReasoningDelta(delta["thinking"])
+                                thinking = delta["thinking"]
+                                yield AgentReasoningDelta(thinking)
+                                if thinking:
+                                    received_thinking_delta = True
                     elif event_type == "content_block_start":
                         index, tool = _tool_update_from_claude_start(event)
                         if tool:
@@ -197,10 +207,14 @@ async def run_claude_code_agent(
                 if class_name == "AssistantMessage":
                     for block in getattr(message, "content", []) or []:
                         if block.__class__.__name__ == "TextBlock":
+                            if received_text_delta:
+                                continue
                             text = getattr(block, "text", "")
                             if text:
                                 yield AgentTextDelta(text)
                         elif block.__class__.__name__ == "ThinkingBlock":
+                            if received_thinking_delta:
+                                continue
                             text = getattr(block, "thinking", "")
                             if text:
                                 yield AgentReasoningDelta(text)

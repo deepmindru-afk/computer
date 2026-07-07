@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-07-07
+
+### Added
+
+- ✨ **Better shared skill discovery.** Computer now finds skills saved in the common agents skill folder, so more reusable workflows show up without extra setup.
+
+### Fixed
+
+- 🤖 **Smoother agent replies.** Coding agents no longer repeat final answers or thinking notes that already appeared while the chat was running.
+- ✅ **Cleaner chat endings.** Thinking notes now close before answers, tool use, or the final saved message, keeping the chat display and completion state tidier.
+- 🔐 **More reliable agent approvals.** Agent approval prompts now handle request IDs more flexibly, so approvals are less likely to get stuck.
+
+## [0.8.4] - 2026-07-07
+
+### Fixed
+
+- 💬 **Slash commands at the start.** New chats no longer block slash commands before the first regular message.
+- 📱 **Better mobile typing.** Pressing Enter on phones and tablets now behaves like normal typing instead of choosing a suggestion or sending too soon.
+- 🤖 **Larger Claude Code replies.** Claude Code can now handle bigger answers before chat display limits are applied.
+
+## [0.8.3] - 2026-07-07
+
+### Fixed
+
+- 💬 **Cleaner chat suggestions.** Slash commands, file matches, skill matches, and model choices now have a little more room and clearer hover hints, so longer names are easier to understand.
+- 🧭 **Better menu hints.** Menus can now show helpful hover hints only when there is something useful to show, keeping empty tooltips out of the way.
+
+## [0.8.2] - 2026-07-07
+
+### Added
+
+- 🌿 **Fork chats from any response.** Start a fresh copy of a conversation from the current response or with `/fork`, so you can try a different direction without changing the original chat.
+- ✨ **Easier skill access.** Type `/` to find skills alongside chat commands, and admins can control skill behavior from a new Skills page.
+
+### Changed
+
+- 🧠 **Smarter skill upkeep.** Computer can help keep managed skills up to date after real chats, while admins can turn skill features on or off.
+- ⚙️ **Tidier settings.** About, sharing, update, license, and PWA reset controls now live in General, with Skills under Admin.
+
+### Fixed
+
+- 💬 **Clearer chat controls.** Message actions now show helpful tooltips, and commands that need an existing chat stay hidden until they can be used.
+- 📦 **More dependable release downloads.** Release runs now attach download files to the right repository more reliably.
+
+## [0.8.1] - 2026-07-06
+
+### Added
+
+- ✅ **Visible task progress.** Chats can now show a live checklist so long-running work is easier to follow.
+- 🕒 **Message timestamps.** Hover over message controls to see when a message was sent.
+
+### Changed
+
+- 🧰 **Better model tool control.** Admins can choose which built-in tool groups each model can use, from files and terminal access to web, memory, images, and sub-agents.
+- 🚀 **More flexible sub-agents.** Sub-agent limits now support higher defaults and unlimited mode for teams that want more parallel work.
+
+### Fixed
+
+- 💬 **More reliable chat lists.** Chat history stays in the right order more consistently, even when a saved chat needs extra cleanup.
+- ✨ **Cleaner skill suggestions.** Skill matches in chat now use a simpler, more consistent icon.
+
 ## [0.8.0] - 2026-07-06
 
 ### Added

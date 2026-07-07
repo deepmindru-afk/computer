@@ -5,6 +5,7 @@
 	import OutputEditView from './OutputEditView.svelte';
 	import ChatFilePreview from './ChatFilePreview.svelte';
 	import ConsecutiveActivityGroup from './ConsecutiveActivityGroup.svelte';
+	import MessageTimestamp from './MessageTimestamp.svelte';
 	import ReasoningCollapsible from './ReasoningCollapsible.svelte';
 	import ToolCallCollapsible from './ToolCallCollapsible.svelte';
 	import { currentWorkspace, openFileTab } from '$lib/stores';
@@ -21,11 +22,13 @@
 		usage: Record<string, number> | null;
 		chatId: string | null;
 		messageId: string;
+		createdAt?: number | null;
 		siblingIndex?: number;
 		siblingTotal?: number;
 		speaking?: boolean;
 		onapprove: (messageId: string, callId: string, approved: boolean) => void;
 		onnavigate?: (direction: -1 | 1) => void;
+		onfork?: () => void;
 		onregenerate?: () => void;
 		onedit?: (content: string, output: any[] | null, submit: boolean) => void;
 		onspeak?: () => void;
@@ -37,11 +40,13 @@
 		usage,
 		chatId,
 		messageId,
+		createdAt = null,
 		siblingIndex = 0,
 		siblingTotal = 1,
 		speaking = false,
 		onapprove,
 		onnavigate,
+		onfork,
 		onregenerate,
 		onedit,
 		onspeak
@@ -593,13 +598,14 @@
 
 		<!-- Controls toolbar -->
 		{#if done || siblingTotal > 1}
-			<div class="flex items-center gap-1 mt-1 -ml-0.5">
+			<div class="group/timestamp-toolbar flex items-center gap-1 mt-1 -ml-0.5">
 				{#if siblingTotal > 1}
 					<button
 						class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30 disabled:cursor-default transition-colors duration-100"
 						disabled={siblingIndex === 0}
 						onclick={() => onnavigate?.(-1)}
 						aria-label={$t('chat.prevResponse')}
+						use:tooltip={$t('chat.prevResponse')}
 					>
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
 							><path
@@ -618,6 +624,7 @@
 						disabled={siblingIndex === siblingTotal - 1}
 						onclick={() => onnavigate?.(1)}
 						aria-label={$t('chat.nextResponse')}
+						use:tooltip={$t('chat.nextResponse')}
 					>
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
 							><path
@@ -634,6 +641,7 @@
 						class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
 						onclick={startEdit}
 						aria-label={$t('chat.editResponse')}
+						use:tooltip={$t('chat.editResponse')}
 					>
 						<svg
 							class="w-3.5 h-3.5"
@@ -654,6 +662,7 @@
 						class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
 						onclick={copyContent}
 						aria-label={$t('chat.copyResponse')}
+						use:tooltip={copied ? $t('about.copied') : $t('chat.copyResponse')}
 					>
 						{#if copied}
 							<svg
@@ -694,7 +703,7 @@
 							: 'text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300'}"
 						onclick={onspeak}
 						aria-label={speaking ? $t('chat.stopSpeaking') : $t('chat.speakResponses')}
-						title={speaking ? $t('chat.stopSpeaking') : $t('chat.speakResponses')}
+						use:tooltip={speaking ? $t('chat.stopSpeaking') : $t('chat.speakResponses')}
 					>
 						<Icon name="speaker" size={14} />
 					</button>
@@ -704,6 +713,7 @@
 						class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
 						onclick={onregenerate}
 						aria-label={$t('chat.regenerateResponse')}
+						use:tooltip={$t('chat.regenerateResponse')}
 					>
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
 							><path
@@ -715,6 +725,16 @@
 						>
 					</button>
 				{/if}
+				{#if done && onfork}
+					<button
+						class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
+						onclick={onfork}
+						aria-label={$t('chat.forkResponse')}
+						use:tooltip={$t('chat.forkResponse')}
+					>
+						<Icon name="chat-fork" size={14} strokeWidth={1.8} />
+					</button>
+				{/if}
 				{#if done && usage && Object.keys(usage).length > 0}
 					<div class="relative flex items-center">
 						<button
@@ -723,6 +743,7 @@
 							onmouseenter={() => (showUsageTooltip = true)}
 							onmouseleave={() => (showUsageTooltip = false)}
 							aria-label={$t('chat.usageInfo')}
+							use:tooltip={$t('chat.usageInfo')}
 						>
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
@@ -773,6 +794,7 @@
 						class="p-0.5 rounded text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-100"
 						onclick={shareContent}
 						aria-label={$t('chat.share')}
+						use:tooltip={$t('chat.share')}
 					>
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
 							><path
@@ -784,6 +806,7 @@
 						>
 					</button>
 				{/if}
+				<MessageTimestamp {createdAt} />
 			</div>
 		{/if}
 	{/if}
