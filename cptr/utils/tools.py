@@ -1611,7 +1611,11 @@ async def view_skill(
     """Load the full instructions and resource listing for an available skill.
     :param skill_name: The name of the skill to load (from the <available_skills> catalog).
     """
-    from cptr.utils.skills import load_skill, format_skill_content
+    from cptr.models import Config
+    from cptr.utils.skills import bump_skill_view, load_skill, format_skill_content
+
+    if (await Config.get("skills.enabled")) in (False, "false", "0"):
+        return "Error: skills are disabled by the administrator."
 
     # Deduplication: if already activated, return short notice
     if skill_name in _activated_skills:
@@ -1622,11 +1626,12 @@ async def view_skill(
         return f"Error: skill '{skill_name}' not found. Check <available_skills> for valid names."
 
     _activated_skills.add(skill_name)
+    bump_skill_view(workspace, skill_name, skill.source)
     return format_skill_content(skill)
 
 
 async def manage_skill(
-    action: Literal["create", "write_file"],
+    action: Literal["create", "update", "write_file", "delete"],
     name: str,
     content: Optional[str] = None,
     scope: Literal["workspace", "global"] = "workspace",
@@ -1635,26 +1640,44 @@ async def manage_skill(
     *,
     __context__: dict,
 ) -> str:
-    """Create Computer-managed skills and supporting bundle files.
+    """Create, update, or delete Computer-managed skills and supporting bundle files.
 
-    Use this only when the user asks to create a reusable skill. New skills
-    default to the current workspace. For supporting files, write only under
-    references/, templates/, scripts/, or assets/.
-    :param action: "create" to write SKILL.md, or "write_file" to add a bundle file.
+    Use this only when the user asks to create, update, or delete a reusable skill.
+    New skills default to the current workspace. For supporting files, write only
+    under references/, templates/, scripts/, or assets/.
+    :param action: "create" to write SKILL.md, "update" to replace SKILL.md, "write_file" to add a bundle file, or "delete" to remove a managed skill.
     :param name: Lowercase hyphenated skill name.
-    :param content: Full SKILL.md content for action="create".
+    :param content: Full SKILL.md content for action="create" or action="update".
     :param scope: "workspace" for .cptr/skills, or "global" for ~/.cptr/skills.
     :param file_path: Relative bundle path for action="write_file".
     :param file_content: File content for action="write_file".
     """
-    from cptr.utils.skills import create_managed_skill, write_managed_skill_file
+    from cptr.utils.skills import (
+        create_managed_skill,
+        delete_managed_skill,
+        update_managed_skill,
+        write_managed_skill_file,
+    )
+    from cptr.models import Config
+
+    if (await Config.get("skills.enabled")) in (False, "false", "0"):
+        return json.dumps({"success": False, "error": "skills are disabled"}, ensure_ascii=False)
+    if (await Config.get("skills.tool_enabled")) in (False, "false", "0"):
+        return json.dumps(
+            {"success": False, "error": "skill management is disabled"},
+            ensure_ascii=False,
+        )
 
     workspace = __context__.get("workspace", "")
     try:
         if action == "create":
             result = create_managed_skill(workspace, name, content or "", scope)
+        elif action == "update":
+            result = update_managed_skill(workspace, name, content or "")
         elif action == "write_file":
             result = write_managed_skill_file(workspace, name, file_path or "", file_content)
+        elif action == "delete":
+            result = delete_managed_skill(workspace, name)
         else:
             result = {"success": False, "error": f"unsupported action '{action}'"}
     except Exception as e:
@@ -2842,6 +2865,17 @@ async def get_tool_list(builtin_tools: dict | None = None) -> list[dict]:
         memory_enabled = (await Config.get("memory.enabled")) not in (False, "false", "0")
         if not memory_enabled:
             tools.pop("update_memory", None)
+        skills_enabled = (await Config.get("skills.enabled")) not in (False, "false", "0")
+        skills_tool_enabled = (await Config.get("skills.tool_enabled")) not in (
+            False,
+            "false",
+            "0",
+        )
+        if not skills_enabled:
+            tools.pop("view_skill", None)
+            tools.pop("manage_skill", None)
+        elif not skills_tool_enabled:
+            tools.pop("manage_skill", None)
         if (await Config.get("browser.enabled")) in (True, "true", "1"):
             tools.update(BROWSER_TOOLS)
         if (await Config.get("subagents.enabled")) in (True, "true", "1"):

@@ -3,6 +3,7 @@
 		getChat,
 		getChats,
 		deleteChat as apiDeleteChat,
+		forkChat as apiForkChat,
 		sendMessage as apiSendMessage,
 		approveToolCall,
 		cancelTask,
@@ -30,6 +31,7 @@
 	import { get } from 'svelte/store';
 	import {
 		currentWorkspace,
+		openChatTab,
 		toolApprovalMode,
 		planMode,
 		streamingBehavior,
@@ -296,6 +298,11 @@
 
 	const streaming = $derived(allMessages.some((m) => m.role === 'assistant' && !m.done));
 	const isLanding = $derived(allMessages.length === 0 && !chatId);
+	const hasChatContent = $derived(
+		activePath.some(
+			({ msg }) => msg.role === 'user' && msg.content.trim() && !msg.content.trim().startsWith('/')
+		)
+	);
 	const workspaceDisplayName = $derived(getPathDisplayName(workspace, 'workspace'));
 	const displayChatTitle = $derived(chatTitle || firstUserMessageTitle() || workspaceDisplayName);
 	const runningCommandSessions = $derived(commandSessions.filter((session) => !session.done));
@@ -715,8 +722,16 @@
 		let text = inputText.trim();
 		if (!text || !selectedModel) return;
 		if (sending) return;
-		if (text === '/compact') {
+		if (!hasChatContent && text.startsWith('/') && text !== '/plan') {
+			toast.error('Only /plan is available before this chat has content');
+			return;
+		}
+		if (hasChatContent && text === '/compact') {
 			await handleManualCompact();
+			return;
+		}
+		if (hasChatContent && text === '/fork') {
+			await handleForkChat();
 			return;
 		}
 		if (text === '/plan') {
@@ -724,12 +739,12 @@
 			inputText = '';
 			return;
 		}
-		if (text === '/status') {
+		if (hasChatContent && text === '/status') {
 			handleStatusCommand();
 			inputText = '';
 			return;
 		}
-		if (text === '/skills:list') {
+		if (hasChatContent && text === '/skills:list') {
 			await handleSkillsListCommand();
 			inputText = '';
 			return;
@@ -891,6 +906,23 @@
 			await loadChat(chatId);
 		} catch (err: any) {
 			toast.error(err?.message || $t('chat.compactFailed'), { id: toastId });
+		} finally {
+			sending = false;
+			chatInputEl?.focus();
+		}
+	}
+
+	async function handleForkChat(messageId?: string | null) {
+		if (!chatId || sending || streaming) return;
+		sending = true;
+		inputText = '';
+		const toastId = toast.loading($t('chat.forking'));
+		try {
+			const result = await apiForkChat(chatId, messageId ?? currentMessageId);
+			openChatTab(result.chat_id);
+			toast.success($t('chat.forkDone'), { id: toastId });
+		} catch (err: any) {
+			toast.error(err?.message || $t('chat.forkFailed'), { id: toastId });
 		} finally {
 			sending = false;
 			chatInputEl?.focus();
@@ -1522,7 +1554,7 @@
 					placeholder={$t('chat.placeholder', { name: workspaceDisplayName })}
 					tasks={chatTasks}
 					onsend={send}
-					onstatus={handleStatusCommand}
+					onplan={handlePlanCommand}
 					{queuedMessages}
 					onqueuesendnow={handleQueueSendNow}
 					onqueueedit={handleQueueEdit}
@@ -1583,6 +1615,7 @@
 								siblingTotal={siblingIds.length}
 								speaking={speakingMessageId === msg.id}
 								onnavigate={(dir) => handleNavigate(msg.id, dir)}
+								onfork={sending || streaming ? undefined : () => handleForkChat(msg.id)}
 								onregenerate={() => handleRegenerate(msg.id)}
 								onedit={(c, o, submit) => handleEditMessage(msg.id, c, o, submit)}
 								onspeak={() => speakMessage(msg.id)}
@@ -1632,9 +1665,11 @@
 					{streaming}
 					{workspace}
 					{contextUsage}
+					{hasChatContent}
 					tasks={chatTasks}
 					onsend={send}
 					oncompact={handleManualCompact}
+					onfork={handleForkChat}
 					onplan={handlePlanCommand}
 					onstatus={handleStatusCommand}
 					onskillslist={handleSkillsListCommand}
