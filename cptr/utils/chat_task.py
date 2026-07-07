@@ -27,7 +27,14 @@ from cptr.utils.ai import (
 )
 from cptr.utils.config import _get_jwt_secret, now_ms
 from cptr.utils.crypto import decrypt_key
-from cptr.utils.tools import ALL_TOOLS, execute_tool, get_tool_list, _fn_to_schema, create_artifact
+from cptr.utils.tools import (
+    ALL_TOOLS,
+    clear_active_tasks,
+    create_artifact,
+    execute_tool,
+    get_tool_list,
+    _fn_to_schema,
+)
 from cptr.utils.chat_export import export_chat_to_file
 from cptr.utils.json_parser import extract_json
 from cptr.utils.prompt_templates import load_system_prompt as _load_system_prompt
@@ -51,6 +58,27 @@ PLAN_MODE_PROMPT = (
 )
 
 SKILLS_CREATE_RE = re.compile(r"^/skills:create(?:\s+(.*))?$", re.IGNORECASE | re.DOTALL)
+
+
+def resolve_builtin_tools_config(
+    chat_models_config: dict | None, *model_ids: str | None
+) -> dict | None:
+    """Merge global/model builtin tool group config. Missing/null means default."""
+    if not isinstance(chat_models_config, dict):
+        return None
+    merged: dict = {}
+    found = False
+    for model_id in ("*", *[m for m in model_ids if m]):
+        model_config = chat_models_config.get(model_id)
+        if not isinstance(model_config, dict):
+            continue
+        params = model_config.get("params", {})
+        value = params.get("builtin_tools") if isinstance(params, dict) else None
+        if isinstance(value, dict):
+            merged.update(value)
+            found = True
+    return merged if found else None
+
 
 COMPUTER_SKILL_AUTHORING_STANDARDS = """\
 Follow the Computer skill-authoring standards:
@@ -1261,6 +1289,10 @@ async def run_chat_task(
             title = "Chat"
         preview = content[:300] if content else ""
         ws_name = workspace.rstrip("/").rsplit("/", 1)[-1] if workspace else ""
+        try:
+            await clear_active_tasks(chat_id, user_id, message_id)
+        except Exception:
+            logger.debug("[task %s] clear_active_tasks failed", message_id[:8], exc_info=True)
         await emit(
             done=True,
             title=title,
@@ -1631,6 +1663,11 @@ async def run_chat_task(
         chat_obj = await Chat.get_by_id(chat_id)
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
         configured_model = (msg.model if msg else None) or model
+        try:
+            chat_models_config = await Config.get("chat.models") or {}
+        except Exception:
+            chat_models_config = {}
+        builtin_tools = resolve_builtin_tools_config(chat_models_config, model, configured_model)
         messages, loaded_summary = await _load_message_history(chat_id, message_id)
         _apply_skills_create_prompt(messages)
         memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
@@ -1646,7 +1683,7 @@ async def run_chat_task(
             system += f"\n\n[CONVERSATION SUMMARY]\n{loaded_summary}"
         if regeneration_prompt:
             messages.append({"role": "user", "content": regeneration_prompt})
-        tools = await get_tool_list()
+        tools = await get_tool_list(builtin_tools=builtin_tools)
 
         # Remove view_skill tool if no skills are available
         skills = discover_skills(workspace)
@@ -1715,15 +1752,17 @@ async def run_chat_task(
         global_rp = {}
         model_rp = {}
         compact_token_threshold = None
-        try:
-            chat_models_config = await Config.get("chat.models") or {}
-            global_rp = chat_models_config.get("*", {}).get("params", {}).get("request_params", {})
-            model_rp = chat_models_config.get(model, {}).get("params", {}).get("request_params", {})
-            compact_token_threshold = resolve_compact_token_threshold(
-                configured_model, chat_models_config=chat_models_config
-            )
-        except Exception:
-            pass
+        global_params = chat_models_config.get("*", {}).get("params", {})
+        if not isinstance(global_params, dict):
+            global_params = {}
+        model_params = chat_models_config.get(model, {}).get("params", {})
+        if not isinstance(model_params, dict):
+            model_params = {}
+        global_rp = global_params.get("request_params") or {}
+        model_rp = model_params.get("request_params") or {}
+        compact_token_threshold = resolve_compact_token_threshold(
+            configured_model, chat_models_config=chat_models_config
+        )
         compact_token_threshold = compact_token_threshold or resolve_compact_token_threshold()
         request_params = {**global_rp, **model_rp, **chat_request_params} or None
 
@@ -1941,6 +1980,7 @@ async def run_chat_task(
                     "chat_id": chat_id,
                     "message_id": message_id,
                     "connection": connection,
+                    "builtin_tools": builtin_tools,
                 }
 
                 # Check if any call needs approval
