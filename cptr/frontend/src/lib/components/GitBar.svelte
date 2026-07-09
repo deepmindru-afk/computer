@@ -26,12 +26,16 @@
 		renameGitBranch
 	} from '$lib/apis/git';
 	import { gitStatusStore } from '$lib/stores/gitStatus.svelte';
+	import { diffDisplayMode, hideWhitespaceChanges } from '$lib/stores/gitDiffSettings';
 	import Icon from './Icon.svelte';
 	import DropdownMenu from './DropdownMenu.svelte';
 	import Modal from './Modal.svelte';
 	import { tooltip } from '$lib/tooltip';
 	import { t } from '$lib/i18n';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import DiffSettingsMenu from './DiffSettingsMenu.svelte';
+	import type { DiffFile } from '$lib/utils/diff';
+	import DiffHunkRows from './DiffHunkRows.svelte';
 
 	type GitFile = {
 		path: string;
@@ -41,8 +45,6 @@
 		staged_status?: string;
 		unstaged_status?: string;
 	};
-	type DiffHunk = { header: string; lines: { type: string; content: string }[] };
-	type DiffFile = { path: string; hunks: DiffHunk[] };
 	type Commit = { hash: string; short_hash: string; author: string; date: string; message: string };
 	type BranchItem = {
 		name: string;
@@ -77,8 +79,10 @@
 	let showDiff = $state(false);
 	let showBranches = $state(false);
 	let showWorktrees = $state(false);
+	let showDiffSettings = $state(false);
 	let branchBtnEl = $state<HTMLButtonElement | undefined>();
 	let worktreeBtnEl = $state<HTMLButtonElement | undefined>();
+	let diffSettingsBtnEl = $state<HTMLButtonElement | undefined>();
 	let branchSearchInputEl = $state<HTMLInputElement | undefined>();
 	let worktreeSearchInputEl = $state<HTMLInputElement | undefined>();
 	let newBranchInputEl = $state<HTMLInputElement | undefined>();
@@ -180,6 +184,15 @@
 		}
 	});
 
+	let _prevHideWhitespace = false;
+	$effect(() => {
+		const hideWhitespace = $hideWhitespaceChanges;
+		if (hideWhitespace === _prevHideWhitespace) return;
+		_prevHideWhitespace = hideWhitespace;
+		if (!expanded || !showDiff) return;
+		reloadSelectedDiff();
+	});
+
 	// Auto-select first file
 	$effect(() => {
 		if (
@@ -206,7 +219,8 @@
 			const params = new URLSearchParams({
 				root: workspacePath,
 				file: path,
-				staged: String(staged)
+				staged: String(staged),
+				ignore_whitespace: String($hideWhitespaceChanges)
 			});
 			if (untracked) params.set('untracked', 'true');
 			const d = await getGitDiff(params.toString());
@@ -221,7 +235,7 @@
 		selectedFile = null;
 		showDiff = true;
 		try {
-			const d = await getGitShow(workspacePath, c.hash);
+			const d = await getGitShow(workspacePath, c.hash, $hideWhitespaceChanges);
 			fileDiff = d.diff?.files ?? [];
 		} catch {
 			fileDiff = [];
@@ -230,6 +244,16 @@
 
 	function backToList() {
 		showDiff = false;
+	}
+
+	function reloadSelectedDiff() {
+		if (selectedCommit) {
+			selectCommit(selectedCommit);
+			return;
+		}
+		if (!selectedFile) return;
+		const file = (gitStatus?.files ?? []).find((item) => item.path === selectedFile);
+		if (file) selectFile(file.path, file.staged, file.status === 'untracked');
 	}
 
 	async function loadHistory() {
@@ -710,32 +734,6 @@
 		}
 	}
 
-	type LineGroup = { type: string; lines: { type: string; content: string }[] };
-
-	function groupLines(lines: { type: string; content: string }[]): LineGroup[] {
-		const groups: LineGroup[] = [];
-		for (const line of lines) {
-			const last = groups[groups.length - 1];
-			if (last && last.type === line.type) {
-				last.lines.push(line);
-			} else {
-				groups.push({ type: line.type, lines: [line] });
-			}
-		}
-		return groups;
-	}
-
-	function blockClass(type: string): string {
-		switch (type) {
-			case 'added':
-				return 'bg-green-100 border-l-[0.1875rem] border-l-green-500 dark:bg-green-500/15 dark:border-l-green-400';
-			case 'removed':
-				return 'bg-red-100 diff-gutter-removed dark:bg-red-500/15';
-			default:
-				return '';
-		}
-	}
-
 	$effect(() => {
 		if (!expanded) return;
 		function onKeydown(e: KeyboardEvent) {
@@ -1174,6 +1172,16 @@
 						</a>
 					{/if}
 
+					<button
+						bind:this={diffSettingsBtnEl}
+						class="flex items-center justify-center w-6 h-6 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors duration-75"
+						onclick={() => (showDiffSettings = true)}
+						use:tooltip={'Diff settings'}
+						aria-label="Diff settings"
+					>
+						<Icon name="settings" size={12} />
+					</button>
+
 					<!-- Maximize toggle -->
 					<button
 						class="flex items-center justify-center w-6 h-6 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/6 transition-colors duration-75"
@@ -1183,6 +1191,14 @@
 						<Icon name={isMaximized ? 'collapse' : 'expand'} size={12} />
 					</button>
 				</div>
+
+				{#if showDiffSettings && diffSettingsBtnEl}
+					<DiffSettingsMenu
+						anchor={diffSettingsBtnEl}
+						onclose={() => (showDiffSettings = false)}
+						preferAbove
+					/>
+				{/if}
 
 				<!-- Content -->
 				<div class="flex min-h-36" style="height: {panelHeight}px;">
@@ -1397,7 +1413,7 @@
 								</span>
 							</div>
 							<div class="flex-1 overflow-auto">
-								<div class="diff-content">
+								<div class="diff-content" class:diff-content-split={$diffDisplayMode === 'split'}>
 									{#each fileDiff as df}
 										{#if fileDiff.length > 1}
 											<div
@@ -1412,32 +1428,7 @@
 											>
 												{hunk.header}
 											</div>
-											{#each groupLines(hunk.lines) as group}
-												<div class="w-full {blockClass(group.type)}">
-													{#each group.lines as line}
-														<div class="px-2 whitespace-pre-wrap break-all">
-															<span
-																class={line.type === 'added'
-																	? 'text-green-600 dark:text-green-400'
-																	: line.type === 'removed'
-																		? 'text-red-500 dark:text-red-400'
-																		: 'text-gray-400 dark:text-gray-600'}
-																>{line.type === 'added'
-																	? '+'
-																	: line.type === 'removed'
-																		? '-'
-																		: ' '}</span
-															><span
-																class={line.type === 'added'
-																	? 'text-green-900 dark:text-green-300'
-																	: line.type === 'removed'
-																		? 'text-red-900 dark:text-red-300'
-																		: 'text-gray-600 dark:text-gray-400'}>{line.content}</span
-															>
-														</div>
-													{/each}
-												</div>
-											{/each}
+											<DiffHunkRows {hunk} path={df.path} showNumbers={false} />
 										{/each}
 									{/each}
 								</div>
@@ -1632,16 +1623,8 @@
 		min-width: 100%;
 	}
 
-	.diff-gutter-removed {
-		border-left: 0.1875rem solid transparent;
-		border-image: repeating-linear-gradient(
-				-45deg,
-				#ef4444 0,
-				#ef4444 1px,
-				transparent 1px,
-				transparent 0.1875rem
-			)
-			3;
+	.diff-content-split {
+		width: 100%;
 	}
 
 	.git-resize-handle {
