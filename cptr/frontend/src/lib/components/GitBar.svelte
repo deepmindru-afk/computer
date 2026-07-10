@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { activeWorkspace, addWorkspace, openFileTab } from '$lib/stores';
+	import { activeWorkspace, addWorkspace, openFileTab, selectedModelId } from '$lib/stores';
 	import {
 		getGitLog,
 		getGitDiff,
@@ -13,6 +13,7 @@
 		unstageFiles,
 		discardChanges,
 		gitCommit,
+		generateGitCommitMessage,
 		gitFetch,
 		gitPull,
 		gitPush,
@@ -44,6 +45,7 @@
 		unstaged?: boolean;
 		staged_status?: string;
 		unstaged_status?: string;
+		binary?: boolean;
 		additions?: number;
 		deletions?: number;
 	};
@@ -108,6 +110,7 @@
 	let commitDescription = $state('');
 	let actionMsg = $state('');
 	let loading = $state(false);
+	let generatingCommitMessage = $state(false);
 	let panelHeight = $state(280);
 	let prevHeight = $state(280);
 	let isMaximized = $state(false);
@@ -373,6 +376,20 @@
 		fileDiff = [];
 		loading = false;
 		await refresh();
+	}
+
+	async function generateCommitMessage() {
+		if (!stagedFiles.length || generatingCommitMessage) return;
+		generatingCommitMessage = true;
+		try {
+			const message = await generateGitCommitMessage(workspacePath, $selectedModelId || undefined);
+			commitSummary = message.summary;
+			commitDescription = message.description;
+		} catch (e) {
+			flash(e instanceof Error ? e.message : $t('git.generateMessageFailed'));
+		} finally {
+			generatingCommitMessage = false;
+		}
 	}
 
 	async function doUncommit() {
@@ -673,6 +690,25 @@
 		return `${Math.floor(s / 86400)}d`;
 	}
 
+	function statusChar(status: string): { char: string; color: string } {
+		switch (status) {
+			case 'added':
+				return { char: 'A', color: 'text-green-500' };
+			case 'untracked':
+				return { char: 'U', color: 'text-green-500' };
+			case 'modified':
+				return { char: 'M', color: 'text-amber-500' };
+			case 'deleted':
+				return { char: 'D', color: 'text-red-400' };
+			case 'renamed':
+				return { char: 'R', color: 'text-blue-400' };
+			case 'conflict':
+				return { char: '!', color: 'text-orange-500' };
+			default:
+				return { char: '?', color: 'text-gray-400' };
+		}
+	}
+
 	const syncAction = $derived.by(() => {
 		if (!gitStatus) return { label: $t('git.fetch'), icon: 'refresh', action: doFetch };
 		if (gitStatus.behind > 0)
@@ -788,25 +824,38 @@
 				<Icon name="chevron-down" size={9} class="text-gray-400 dark:text-gray-600" />
 			</button>
 
-			{#if gitStatus.ahead > 0}<span
+			{#if gitStatus.ahead > 0}
+				<span
 					class="ml-1.5 shrink-0 whitespace-nowrap text-[0.625rem] font-mono text-gray-400 dark:text-gray-600"
-					>↑{gitStatus.ahead}</span
-				>{/if}
-			{#if gitStatus.behind > 0}<span
-					class="text-[0.625rem] font-mono text-gray-400 dark:text-gray-600 ml-1"
-					>↓{gitStatus.behind}</span
-				>{/if}
-			{#if totalChanges > 0}<span
+				>
+					↑{gitStatus.ahead}
+				</span>
+			{/if}
+			{#if gitStatus.behind > 0}
+				<span class="text-[0.625rem] font-mono text-gray-400 dark:text-gray-600 ml-1">
+					↓{gitStatus.behind}
+				</span>
+			{/if}
+			{#if totalChanges > 0}
+				<span
 					class="mx-1.5 block min-w-0 max-w-20 shrink truncate whitespace-nowrap text-[0.625rem] font-mono text-gray-400 dark:text-gray-600"
-					>{$t('git.changedCount', { count: totalChanges })}</span
-				><span class="mx-1.5 flex shrink-0 items-center gap-1 text-[0.625rem] font-mono"
-					><span class="text-green-600 dark:text-green-400">+{totalAdditions}</span>
-					<span class="text-red-500 dark:text-red-400">-{totalDeletions}</span></span
-				>{/if}
-			{#if actionMsg}<span
+				>
+					{$t('git.changedCount', { count: totalChanges })}
+				</span>
+				{#if totalAdditions || totalDeletions}
+					<span class="mx-1.5 flex shrink-0 items-center gap-1 text-[0.625rem] font-mono">
+						<span class="text-green-600 dark:text-green-400">+{totalAdditions}</span>
+						<span class="text-red-500 dark:text-red-400">-{totalDeletions}</span>
+					</span>
+				{/if}
+			{/if}
+			{#if actionMsg}
+				<span
 					class="ml-auto min-w-0 max-w-32 truncate whitespace-nowrap text-[0.625rem] font-mono text-gray-400 dark:text-gray-600"
-					>{actionMsg}</span
-				>{/if}
+				>
+					{actionMsg}
+				</span>
+			{/if}
 
 			<div class="flex-1"></div>
 
@@ -1235,6 +1284,7 @@
 							<div class="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
 								{#each gitStatus?.files ?? [] as file (file.path)}
 									{@const fp = fPath(file.path)}
+									{@const sc = statusChar(file.status)}
 									<button
 										class="group flex min-w-0 items-center gap-1.5 w-full h-7 px-2.5 text-left transition-colors duration-75
 											{selectedFile === file.path
@@ -1273,12 +1323,20 @@
 												}}>{fp.name}</span
 											>
 										</span>
-										<span
-											class="flex shrink-0 items-center gap-1 text-[0.625rem] font-mono font-medium"
-										>
-											<span class="text-green-600 dark:text-green-400">+{file.additions ?? 0}</span>
-											<span class="text-red-500 dark:text-red-400">-{file.deletions ?? 0}</span>
-										</span>
+										{#if file.binary}
+											<span class="shrink-0 text-[0.625rem] font-mono font-bold {sc.color}"
+												>{sc.char}</span
+											>
+										{:else}
+											<span
+												class="flex shrink-0 items-center gap-1 text-[0.625rem] font-mono font-medium"
+											>
+												<span class="text-green-600 dark:text-green-400"
+													>+{file.additions ?? 0}</span
+												>
+												<span class="text-red-500 dark:text-red-400">-{file.deletions ?? 0}</span>
+											</span>
+										{/if}
 										<!-- svelte-ignore a11y_no_static_element_interactions -->
 										<span
 											class="flex items-center justify-center w-5 h-5 rounded shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-all duration-75"
@@ -1298,15 +1356,31 @@
 								<div
 									class="rounded-lg border border-gray-200 dark:border-white/8 overflow-hidden focus-within:border-gray-300 dark:focus-within:border-white/15 transition-colors"
 								>
-									<input
-										type="text"
-										class="w-full h-7 px-2 bg-transparent text-[0.6875rem] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none"
-										placeholder={$t('git.summaryRequired')}
-										bind:value={commitSummary}
-										onkeydown={(e) => {
-											if (e.key === 'Enter' && !e.shiftKey) doCommit();
-										}}
-									/>
+									<div class="relative">
+										<input
+											type="text"
+											class="w-full h-7 pl-2 pr-7 bg-transparent text-[0.6875rem] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none"
+											placeholder={$t('git.summaryRequired')}
+											bind:value={commitSummary}
+											onkeydown={(e) => {
+												if (e.key === 'Enter' && !e.shiftKey) doCommit();
+											}}
+										/>
+										<button
+											class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-default disabled:opacity-50 dark:text-gray-600 dark:hover:bg-white/10 dark:hover:text-gray-300"
+											type="button"
+											disabled={!stagedFiles.length || generatingCommitMessage}
+											use:tooltip={$t('git.generateMessage')}
+											aria-label={$t('git.generateMessage')}
+											onclick={generateCommitMessage}
+										>
+											{#if generatingCommitMessage}
+												<Spinner size={10} />
+											{:else}
+												<Icon name="spark" size={11} />
+											{/if}
+										</button>
+									</div>
 									<textarea
 										class="w-full px-2 py-1.5 bg-transparent text-[0.6875rem] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none resize-none border-t border-gray-100 dark:border-white/4"
 										rows="2"

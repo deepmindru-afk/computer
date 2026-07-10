@@ -626,6 +626,12 @@ async def generate_chat_title(
         if not title:
             return
 
+        # Do not overwrite a title manually set while this request was running.
+        chat = await Chat.get_by_id(chat_id)
+        fallback = user_content[:50].strip() or "New Chat"
+        if not chat or chat.title != fallback:
+            return
+
         # Persist and notify
         await Chat.update_title(chat_id, title, now_ms())
         await emit_to_user(user_id, {"chat_id": chat_id, "title": title})
@@ -1459,6 +1465,7 @@ async def run_chat_task(
         from cptr.utils.agents.cursor import run_cursor_agent
         from cptr.utils.agents.grok import run_grok_agent
         from cptr.utils.agents.opencode import run_opencode_agent
+        from cptr.utils.agents.pi import run_pi_agent
 
         chat_obj = await Chat.get_by_id(chat_id)
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
@@ -1517,25 +1524,27 @@ async def run_chat_task(
             "grok": run_grok_agent,
             "opencode": run_opencode_agent,
             "cline": run_cline_agent,
+            "pi": run_pi_agent,
         }
         runner = runners.get(agent_target.agent)
         if runner is None:
             raise RuntimeError(f"Unsupported agent type: {agent_target.agent}")
-        reasoning_buffer = ""
-        reasoning_item_id = f"reasoning-{message_id}"
+
+        def _active_reasoning_item():
+            return next(
+                (
+                    item
+                    for item in reversed(output_items)
+                    if item.get("type") == "reasoning" and item.get("status") == "in_progress"
+                ),
+                None,
+            )
 
         async def _finish_reasoning_item():
-            existing = next(
-                (item for item in output_items if item.get("id") == reasoning_item_id), None
-            )
-            if not existing or existing.get("status") == "completed":
+            existing = _active_reasoning_item()
+            if not existing:
                 return
-            item = {
-                "type": "reasoning",
-                "id": reasoning_item_id,
-                "status": "completed",
-                "content": [{"type": "reasoning_text", "text": reasoning_buffer}],
-            }
+            item = {**existing, "status": "completed"}
             _upsert_output_item(output_items, item)
             await emit(output=item)
             _sync_state()
@@ -1557,13 +1566,29 @@ async def run_chat_task(
                 await emit(delta=event.text)
                 _sync_state()
             elif isinstance(event, AgentReasoningDelta):
-                reasoning_buffer += event.text
-                item = {
-                    "type": "reasoning",
-                    "id": reasoning_item_id,
-                    "status": "in_progress",
-                    "content": [{"type": "reasoning_text", "text": reasoning_buffer}],
-                }
+                existing = _active_reasoning_item()
+                if existing:
+                    blocks = existing.get("content") or []
+                    text = next(
+                        (
+                            block.get("text", "")
+                            for block in blocks
+                            if isinstance(block, dict) and block.get("type") == "reasoning_text"
+                        ),
+                        "",
+                    )
+                    item = {
+                        **existing,
+                        "content": [{"type": "reasoning_text", "text": f"{text}{event.text}"}],
+                    }
+                else:
+                    section = sum(item.get("type") == "reasoning" for item in output_items) + 1
+                    item = {
+                        "type": "reasoning",
+                        "id": f"reasoning-{message_id}-{section}",
+                        "status": "in_progress",
+                        "content": [{"type": "reasoning_text", "text": event.text}],
+                    }
                 _upsert_output_item(output_items, item)
                 await emit(output=item)
                 _sync_state()
@@ -1675,7 +1700,7 @@ async def run_chat_task(
                     "call_id": event.call_id,
                     "native_agent": True,
                     "output": _append_capped_output(
-                        str(existing_output.get("output") or ""),
+                        "" if event.replace else str(existing_output.get("output") or ""),
                         event.delta,
                         max_chars,
                     ),

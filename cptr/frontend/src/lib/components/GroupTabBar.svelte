@@ -9,6 +9,7 @@
 		reorderTabs,
 		openUntitledFileTab,
 		openTerminalTab,
+		openBrowserTab,
 		openInSplit,
 		closeGroup,
 		moveTabToGroup,
@@ -35,9 +36,10 @@
 		group: EditorGroup;
 		canClose?: boolean;
 		isPrimary?: boolean;
+		onTabDragOver?: () => void;
 	}
 
-	let { group, canClose = false, isPrimary = false }: Props = $props();
+	let { group, canClose = false, isPrimary = false, onTabDragOver }: Props = $props();
 
 	let tabsEl: HTMLDivElement | undefined = $state();
 	let sortable: Sortable | null = null;
@@ -78,6 +80,8 @@
 				return 'chat-bubble';
 			case 'preview':
 				return 'monitor';
+			case 'browser':
+				return 'browser';
 			default:
 				return 'page';
 		}
@@ -142,6 +146,8 @@
 		// Only accept tab drags (not file uploads)
 		if (!e.dataTransfer || !hasTabDrag(e.dataTransfer)) return;
 		e.preventDefault();
+		e.stopPropagation();
+		onTabDragOver?.();
 		e.dataTransfer.dropEffect = 'move';
 		dropHighlight = true;
 	}
@@ -155,8 +161,9 @@
 		if (!e.dataTransfer) return;
 		const payload = readTabDragPayload(e.dataTransfer);
 		if (!payload) return;
-		if (payload.groupId === group.id) return; // same group, ignore
 		e.preventDefault();
+		e.stopPropagation();
+		if (payload.groupId === group.id) return; // same group, ignore
 		moveTabToGroup(payload.tabId, payload.groupId, group.id);
 	}
 
@@ -189,6 +196,12 @@
 				openTerminalTab(group.id);
 			}
 		},
+		{
+			label: $t('bar.newBrowser'),
+			icon: 'browser',
+			shortcut: formatChord($keybindings.newBrowser),
+			onclick: () => openBrowserTab(group.id)
+		},
 		...($voiceMemosEnabled
 			? [
 					{
@@ -208,7 +221,7 @@
 		const tab = contextMenu.tab;
 		const items: { label: string; icon?: string; onclick: () => void; divider?: boolean }[] = [];
 
-		if (isWideScreen && tab.type === 'file' && tab.filePath && !$splitActive) {
+		if (isWideScreen && tab.type === 'file' && tab.filePath) {
 			items.push({
 				label: $t('bar.splitRight'),
 				icon: 'split-horizontal',
@@ -242,7 +255,7 @@
 				active: direction === 'horizontal',
 				onclick: () => {
 					setSplitDirection('horizontal');
-					if (!$splitActive) splitCurrentTab('horizontal');
+					splitCurrentTab('horizontal');
 				}
 			},
 			{
@@ -251,7 +264,7 @@
 				active: direction === 'vertical',
 				onclick: () => {
 					setSplitDirection('vertical');
-					if (!$splitActive) splitCurrentTab('vertical');
+					splitCurrentTab('vertical');
 				}
 			}
 		];
@@ -265,7 +278,7 @@
 		if (tabsEl) {
 			sortable = Sortable.create(tabsEl, {
 				animation: 150,
-				ghostClass: 'opacity-30',
+				ghostClass: 'tab-reorder-preview',
 				dragClass: 'cursor-grabbing',
 				direction: 'horizontal',
 				delay: 200,
@@ -296,9 +309,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="flex items-center h-9 px-1.5 gap-1 shrink-0 select-none border-b transition-colors duration-100
-		{dropHighlight
-		? 'border-blue-400 bg-blue-50 dark:bg-blue-500/5 dark:border-blue-500/40'
-		: 'border-gray-200 dark:border-white/6'}
+		{dropHighlight ? 'tab-reorder-drop-preview' : 'border-gray-200 dark:border-white/6'}
 		{isActiveGroup ? '' : 'opacity-50'}"
 	onclick={handlePaneClick}
 	ondragover={handleBarDragOver}
@@ -373,8 +384,8 @@
 
 	<!-- Right-side controls -->
 	<div class="flex items-center gap-0.5 shrink-0">
-		<!-- Split button (wide screens, primary group only) -->
-		{#if isPrimary && isWideScreen}
+		<!-- Split button (wide screens) -->
+		{#if isWideScreen}
 			<button
 				bind:this={splitBtnEl}
 				class="flex items-center justify-center w-7 h-7 rounded-lg transition-colors duration-100 shrink-0
@@ -450,5 +461,17 @@
 	}
 	.group-tabs-row::-webkit-scrollbar {
 		display: none;
+	}
+
+	.tab-reorder-preview {
+		background: color-mix(in oklab, var(--app-fg) 6%, transparent) !important;
+		box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--app-fg) 16%, transparent);
+		opacity: 1 !important;
+	}
+
+	.tab-reorder-drop-preview {
+		background: color-mix(in oklab, var(--app-fg) 6%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--app-fg) 16%, transparent);
+		border-color: transparent;
 	}
 </style>
