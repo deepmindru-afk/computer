@@ -14,7 +14,11 @@
 		onstate: (state: BrowserState) => void;
 		onstatus: (status: string, message?: string, mode?: 'proxy') => void;
 		onquality: (quality: 'low' | 'balanced' | 'crisp' | null) => void;
+		ondevicemode: (mode: DeviceMode, viewport: MobileViewport) => void;
 	}
+
+	type DeviceMode = 'auto' | 'desktop' | 'mobile';
+	type MobileViewport = { width: number; height: number };
 
 	interface DeviceProfile {
 		userAgent: string;
@@ -42,7 +46,7 @@
 		height: number;
 	}
 
-	let { sessionId, active, onstate, onstatus, onquality }: Props = $props();
+	let { sessionId, active, onstate, onstatus, onquality, ondevicemode }: Props = $props();
 	let canvas: HTMLCanvasElement;
 	let container: HTMLDivElement;
 	let keyboardAntenna: HTMLTextAreaElement;
@@ -55,7 +59,7 @@
 	let viewportTimer: ReturnType<typeof setTimeout> | undefined;
 	let reconnectAttempt = 0;
 	let disposed = false;
-	let viewport = { width: 1280, height: 720 };
+	let viewport = { width: 0, height: 0 };
 	let pendingPointer: Record<string, unknown> | undefined;
 	let pointerFrame = 0;
 	let hasFrame = false;
@@ -64,6 +68,8 @@
 	let managed = $state(false);
 	let mobile = $state(false);
 	let quality = $state<'low' | 'balanced' | 'crisp'>('balanced');
+	let deviceMode = $state<DeviceMode>('auto');
+	let mobileViewport = $state<MobileViewport>({ width: 390, height: 844 });
 	let deviceProfile: DeviceProfile | undefined;
 	let editableRegions = $state<EditableRegion[]>([]);
 	let lastViewport = '';
@@ -71,6 +77,7 @@
 	let suppressText = '';
 	let keepKeyboardFocus = false;
 	let audioClockOrigin: number | undefined;
+	let reapplyViewportAfterConfig = true;
 	const pressedKeys = new Map<string, Record<string, unknown>>();
 	const touchPoints = new Map<number, Record<string, unknown>>();
 	const macClient = /Mac|iPhone|iPad/.test(navigator.userAgent);
@@ -134,6 +141,7 @@
 		if (disposed) return;
 		ready = false;
 		lastViewport = '';
+		reapplyViewportAfterConfig = true;
 		awaitingFrame = true;
 		onstatus(hasFrame ? 'playing' : 'reconnecting');
 		const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -160,7 +168,15 @@
 				managed = message.managed === true;
 				if (message.quality?.preset in { low: true, balanced: true, crisp: true })
 					quality = message.quality.preset;
+				if (message.device_mode in { auto: true, desktop: true, mobile: true })
+					deviceMode = message.device_mode;
+				if (
+					Number.isFinite(message.mobile_viewport?.width) &&
+					Number.isFinite(message.mobile_viewport?.height)
+				)
+					mobileViewport = message.mobile_viewport;
 				onquality(managed ? quality : null);
+				ondevicemode(deviceMode, mobileViewport);
 				if (active) focusBrowser();
 				else resize();
 			}
@@ -236,6 +252,10 @@
 			}
 		});
 		decoder.configure({ codec: config.codec, optimizeForLatency: true });
+		if (managed && reapplyViewportAfterConfig) {
+			reapplyViewportAfterConfig = false;
+			void sendViewport(true);
+		}
 	}
 
 	function configureAudio(config: { codec: string; sampleRate: number; numberOfChannels: number }) {
@@ -296,9 +316,12 @@
 	function resize(debounce = false) {
 		if (!container || !ready) return;
 		const rect = container.getBoundingClientRect();
+		const width = Math.round(rect.width);
+		const height = Math.round(rect.height);
+		if (width <= 0 || height <= 0) return;
 		viewport = {
-			width: Math.max(320, Math.min(1920, Math.round(rect.width))),
-			height: Math.max(240, Math.min(1080, Math.round(rect.height)))
+			width,
+			height
 		};
 		if (viewportTimer) clearTimeout(viewportTimer);
 		if (debounce || (mobile && document.activeElement === keyboardAntenna)) {
@@ -308,12 +331,20 @@
 		}
 	}
 
-	async function sendViewport() {
+	async function sendViewport(force = false) {
 		const device = deviceProfile || (await deviceProfilePromise);
-		const key = JSON.stringify([viewport, quality, device]);
-		if (key === lastViewport) return;
+		const key = JSON.stringify([viewport, quality, device, deviceMode, mobileViewport]);
+		if (!force && key === lastViewport) return;
 		lastViewport = key;
-		send({ type: 'viewport', ...viewport, quality, device });
+		send({
+			type: 'viewport',
+			...viewport,
+			quality,
+			device,
+			device_mode: deviceMode,
+			mobile_viewport: mobileViewport,
+			force
+		});
 	}
 
 	function modifiers(event: MouseEvent | KeyboardEvent | WheelEvent) {
@@ -561,6 +592,19 @@
 		onquality(quality);
 		resize();
 	}
+	export function setDeviceMode(nextMode: DeviceMode) {
+		deviceMode = nextMode;
+		lastViewport = '';
+		ondevicemode(deviceMode, mobileViewport);
+		resize();
+	}
+	export function setMobileViewport(nextViewport: MobileViewport) {
+		if (nextViewport.width <= 0 || nextViewport.height <= 0) return;
+		mobileViewport = nextViewport;
+		lastViewport = '';
+		ondevicemode(deviceMode, mobileViewport);
+		resize();
+	}
 	function focusBrowser() {
 		if (!ready) return;
 		send({ type: 'focus' });
@@ -655,10 +699,17 @@
 	}
 	.chrome-container {
 		position: relative;
+		display: grid;
+		place-items: center;
 	}
 	canvas {
+		width: auto;
+		height: auto;
+		max-width: 100%;
+		max-height: 100%;
+		margin: auto;
 		outline: none;
-		object-fit: fill;
+		object-fit: contain;
 		touch-action: none;
 	}
 	.keyboard-antenna {

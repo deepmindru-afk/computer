@@ -43,9 +43,16 @@ export type { AppearancePreferences, Theme, ThemeConfig };
 
 // ── Types ───────────────────────────────────────────────────────
 
+export interface FileSearchTarget {
+	line: number;
+	column: number;
+	length: number;
+	requestId: number;
+}
+
 export interface Tab {
 	id: string;
-	type: 'files' | 'terminal' | 'file' | 'git' | 'chat' | 'preview' | 'browser'; // preview is migrated on load
+	type: 'home' | 'files' | 'terminal' | 'file' | 'git' | 'chat' | 'preview' | 'browser'; // preview is migrated on load
 	label: string;
 	filePath?: string;
 	edit?: boolean;
@@ -56,6 +63,7 @@ export interface Tab {
 	unsaved?: boolean;
 	permanent?: boolean;
 	badge?: number;
+	searchTarget?: FileSearchTarget;
 }
 
 export type SplitDirection = 'horizontal' | 'vertical';
@@ -113,6 +121,7 @@ export interface UserPreferences {
 	pwa?: PwaPreferences;
 	textScale?: number | null;
 	widescreenMode?: boolean;
+	homeGroup?: EditorGroup;
 }
 
 // ── ID generation ───────────────────────────────────────────────
@@ -254,6 +263,11 @@ function normalizeLayout(
 
 /** The workspace currently displayed in THIS browser tab. Null = welcome page. */
 export const currentWorkspace = writable<WorkspaceState | null>(null);
+export const homeGroup = writable<EditorGroup>({
+	id: 'home',
+	tabs: [{ id: 'home', type: 'home', label: 'Home', permanent: true }],
+	activeTabId: 'home'
+});
 
 /** List of all workspace summaries for the sidebar. */
 export const workspaceList = writable<{ path: string; name: string }[]>([]);
@@ -393,7 +407,7 @@ function persistPreferences(): void {
 			appearance: {
 				theme: get(theme),
 				themeConfig: sanitizeThemeConfig(get(themeConfig)),
-				textScale: get(textScale) ?? undefined
+				textScale: get(textScale)
 			},
 			sidebarOpen: get(sidebarOpen),
 			sidebarWidth: get(sidebarWidth),
@@ -407,8 +421,9 @@ function persistPreferences(): void {
 			requestParams: Object.keys(get(requestParams)).length ? get(requestParams) : undefined,
 			showUpdateToast: get(showUpdateToastPref),
 			pwa: get(pwaPreferences),
-			textScale: get(textScale) ?? undefined,
-			widescreenMode: get(widescreenMode)
+			textScale: get(textScale),
+			widescreenMode: get(widescreenMode),
+			homeGroup: get(homeGroup)
 		};
 		savePreferences(prefs as unknown as Record<string, unknown>).catch(() => {});
 	}, 300);
@@ -420,6 +435,9 @@ function subscribeForPersistence() {
 	_subscribed = true;
 	currentWorkspace.subscribe(() => {
 		if (get(stateLoaded)) persistWorkspace();
+	});
+	homeGroup.subscribe(() => {
+		if (get(stateLoaded)) persistPreferences();
 	});
 	theme.subscribe(() => {
 		if (get(stateLoaded)) persistPreferences();
@@ -507,6 +525,36 @@ export async function loadPreferences(): Promise<void> {
 					: null
 		);
 		if (prefs.widescreenMode !== undefined) widescreenMode.set(prefs.widescreenMode as boolean);
+		const savedHomeGroup = prefs.homeGroup as EditorGroup | undefined;
+		if (savedHomeGroup && Array.isArray(savedHomeGroup.tabs)) {
+			const [terminalIds, browserIds] = await Promise.all([
+				listSessions().catch(() => []),
+				listBrowserSessions().catch(() => [])
+			]);
+			const aliveTerminals = new Set(terminalIds);
+			const aliveBrowsers = new Set(browserIds);
+			const tabs = savedHomeGroup.tabs.filter(
+				(tab) =>
+					tab.type !== 'terminal' ||
+					(tab.sessionId !== undefined && aliveTerminals.has(tab.sessionId))
+			);
+			const liveTabs = tabs.filter(
+				(tab) =>
+					tab.type !== 'browser' ||
+					(tab.browserSessionId !== undefined && aliveBrowsers.has(tab.browserSessionId))
+			);
+			if (!liveTabs.some((tab) => tab.type === 'home')) {
+				liveTabs.unshift({ id: 'home', type: 'home', label: 'Home', permanent: true });
+			}
+			homeGroup.set({
+				...savedHomeGroup,
+				id: 'home',
+				tabs: liveTabs,
+				activeTabId: liveTabs.some((tab) => tab.id === savedHomeGroup.activeTabId)
+					? savedHomeGroup.activeTabId
+					: 'home'
+			});
+		}
 		const pwaPrefs = prefs.pwa;
 		if (pwaPrefs)
 			pwaPreferences.set({
@@ -844,10 +892,28 @@ export function updateTabLabel(tabId: string, label: string): void {
 	);
 }
 
+export function clearFileSearchTarget(tabId: string, requestId: number): void {
+	currentWorkspace.update((workspace) =>
+		workspace
+			? {
+					...workspace,
+					groups: workspace.groups.map((group) => ({
+						...group,
+						tabs: group.tabs.map((tab) =>
+							tab.id === tabId && tab.searchTarget?.requestId === requestId
+								? { ...tab, searchTarget: undefined }
+								: tab
+						)
+					}))
+				}
+			: workspace
+	);
+}
+
 export function openFileTab(
 	filePath: string,
 	targetGroupId?: string,
-	options: { edit?: boolean } = {}
+	options: { edit?: boolean; searchTarget?: FileSearchTarget } = {}
 ): void {
 	const ws = get(currentWorkspace);
 	if (!ws) return;
@@ -859,9 +925,13 @@ export function openFileTab(
 	// Reuse existing tab within this group
 	const existing = group.tabs.find((t) => t.type === 'file' && t.filePath === filePath);
 	if (existing) {
-		if (options.edit) {
+		if (options.edit || options.searchTarget) {
 			updateGroupTabs(gid, (tabs) => ({
-				tabs: tabs.map((t) => (t.id === existing.id ? { ...t, edit: true } : t)),
+				tabs: tabs.map((t) =>
+					t.id === existing.id
+						? { ...t, ...(options.edit ? { edit: true } : {}), searchTarget: options.searchTarget }
+						: t
+				),
 				activeTabId: existing.id
 			}));
 			return;
@@ -876,7 +946,8 @@ export function openFileTab(
 		type: 'file',
 		label: name,
 		filePath,
-		edit: options.edit
+		edit: options.edit,
+		searchTarget: options.searchTarget
 	};
 
 	updateGroupTabs(gid, (tabs) => ({
