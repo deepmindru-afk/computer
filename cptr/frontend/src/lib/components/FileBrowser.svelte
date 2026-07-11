@@ -49,8 +49,10 @@
 	let searchQuery = $state('');
 	let matchResults = $state<FileMatch[] | null>(null);
 	let matchLoading = $state(false);
+	let matchLoadingMore = $state(false);
 	let matchError = $state<string | null>(null);
-	let matchesTruncated = $state(false);
+	let matchLoadMoreError = $state(false);
+	let nextMatchOffset = $state<number | null>(null);
 	let matchTimer: ReturnType<typeof setTimeout> | null = null;
 	let matchController: AbortController | null = null;
 	let matchRequestId = 0;
@@ -93,6 +95,8 @@
 	let workspacePath = $derived($activeWorkspace?.path ?? '/');
 	let searchText = $derived(searchQuery.trim());
 	let isSearching = $derived(Boolean(searchText));
+	let filenameMatches = $derived(matchResults?.filter((match) => match.name_match) ?? []);
+	let contentOnlyMatches = $derived(matchResults?.filter((match) => !match.name_match) ?? []);
 	let gitStatus = $derived(gitStatusStore.status);
 	let gitRoot = $derived(workspacePath.replace(/\/$/, ''));
 
@@ -327,7 +331,9 @@
 		if (!query) {
 			matchResults = null;
 			matchLoading = false;
-			matchesTruncated = false;
+			matchLoadingMore = false;
+			matchLoadMoreError = false;
+			nextMatchOffset = null;
 			return;
 		}
 
@@ -338,14 +344,17 @@
 		addMenuOpen = false;
 		sortMenuOpen = false;
 		matchLoading = true;
+		matchLoadingMore = false;
+		matchLoadMoreError = false;
+		nextMatchOffset = null;
 		matchTimer = setTimeout(async () => {
 			const controller = new AbortController();
 			matchController = controller;
 			try {
-				const data = await getFileMatches(query, cwd, hidden, controller.signal);
+				const data = await getFileMatches(query, cwd, hidden, 0, controller.signal);
 				if (requestId === matchRequestId) {
 					matchResults = data.results;
-					matchesTruncated = data.truncated;
+					nextMatchOffset = data.next_offset;
 				}
 			} catch (e: any) {
 				if (e.name !== 'AbortError' && requestId === matchRequestId) {
@@ -357,6 +366,48 @@
 			}
 		}, 200);
 	});
+
+	async function loadMoreMatches() {
+		const offset = nextMatchOffset;
+		if (offset === null || !isSearching || matchLoading || matchLoadingMore || matchLoadMoreError)
+			return;
+
+		const query = searchText;
+		const hidden = showHidden;
+		const requestId = matchRequestId;
+		matchLoadingMore = true;
+		const controller = new AbortController();
+		matchController = controller;
+		try {
+			const data = await getFileMatches(query, cwd, hidden, offset, controller.signal);
+			if (requestId === matchRequestId) {
+				matchResults = [...(matchResults ?? []), ...data.results];
+				nextMatchOffset = data.next_offset;
+			}
+		} catch (e: any) {
+			if (e.name !== 'AbortError' && requestId === matchRequestId) {
+				matchLoadMoreError = true;
+			}
+		} finally {
+			if (requestId === matchRequestId) matchLoadingMore = false;
+		}
+	}
+
+	function retryMoreMatches() {
+		matchLoadMoreError = false;
+		void loadMoreMatches();
+	}
+
+	function loadMoreOnVisible(node: HTMLElement) {
+		const observer = new IntersectionObserver(
+			([entry]) => {
+				if (entry.isIntersecting) void loadMoreMatches();
+			},
+			{ rootMargin: '160px' }
+		);
+		observer.observe(node);
+		return { destroy: () => observer.disconnect() };
+	}
 
 	// Keep the websocket watch path in sync (separate effect so it doesn't
 	// re-trigger directory fetches via fsTick feedback loops)
@@ -526,21 +577,9 @@
 		setFileBrowserCwd(path);
 	}
 
-	function highlightParts(text: string): { text: string; match: boolean }[] {
-		const query = searchText.toLowerCase();
-		if (!query) return [{ text, match: false }];
-		const parts: { text: string; match: boolean }[] = [];
-		const lower = text.toLowerCase();
-		let start = 0;
-		let index = lower.indexOf(query, start);
-		while (index !== -1) {
-			if (index > start) parts.push({ text: text.slice(start, index), match: false });
-			parts.push({ text: text.slice(index, index + query.length), match: true });
-			start = index + query.length;
-			index = lower.indexOf(query, start);
-		}
-		if (start < text.length) parts.push({ text: text.slice(start), match: false });
-		return parts;
+	function parentPath(relativePath: string): string {
+		const slash = relativePath.lastIndexOf('/');
+		return slash === -1 ? '' : relativePath.slice(0, slash);
 	}
 
 	function openFileMatch(match: FileMatch) {
@@ -1227,64 +1266,81 @@
 					<p class="text-xs text-gray-400 dark:text-gray-600">{$t('files.noMatches')}</p>
 				</div>
 			{:else}
-				{#each matchResults as match (match.path)}
-					<div class="mb-1 rounded-lg bg-gray-50 dark:bg-white/[0.03] overflow-hidden">
+				{#snippet resultRows(matches: FileMatch[])}
+					{#each matches as match (match.path)}
 						<button
-							class="flex items-center gap-2 w-full min-h-8 px-2 text-left hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors duration-75"
+							class="flex items-center gap-2 w-full h-7 px-2 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-white/4 transition-colors duration-75"
 							onclick={() => openFileMatch(match)}
 						>
-							<span
-								class="flex items-center justify-center w-4 shrink-0 {match.type === 'directory'
+							<Icon
+								name={fileIconName(match.name, match.type)}
+								size={14}
+								strokeWidth={1.4}
+								class="shrink-0 {match.type === 'directory'
 									? 'text-gray-500 dark:text-gray-400'
 									: 'text-gray-400 dark:text-gray-500'}"
-							>
-								<Icon name={fileIconName(match.name, match.type)} size={14} strokeWidth={1.4} />
+							/>
+							<span class="min-w-0 flex-1 truncate text-xs text-gray-800 dark:text-gray-200">
+								{match.name}
+								{#if parentPath(match.relative_path)}
+									<span class="ml-1.5 text-[0.6875rem] text-gray-400 dark:text-gray-600"
+										>{parentPath(match.relative_path)}</span
+									>
+								{/if}
 							</span>
-							<span class="min-w-0 flex-1">
-								<span class="block truncate text-xs text-gray-800 dark:text-gray-200">
-									{#each highlightParts(match.name) as part}
-										<span
-											class={part.match ? 'font-semibold bg-amber-200/70 dark:bg-amber-400/20' : ''}
-											>{part.text}</span
-										>
-									{/each}
-								</span>
-								<span class="block truncate text-[0.625rem] text-gray-400 dark:text-gray-600"
-									>{match.relative_path}</span
-								>
-							</span>
-							{#if match.name_match}
-								<span class="shrink-0 text-[0.625rem] text-gray-400 dark:text-gray-500"
-									>{$t('files.filenameMatch')}</span
-								>
-							{/if}
 						</button>
-						{#each match.content_matches as contentMatch (contentMatch.line)}
+						{#if match.content_matches.length > 0}
+							{@const preview = match.content_matches[0]}
 							<button
-								class="flex w-full items-baseline gap-2 px-2 py-1 pl-8 text-left hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors duration-75"
-								onclick={() => openContentMatch(match, contentMatch)}
+								class="flex items-center gap-2 w-full h-6 pl-8 pr-2 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-white/4 transition-colors duration-75"
+								onclick={() => openContentMatch(match, preview)}
 							>
-								<span class="shrink-0 text-[0.625rem] font-mono text-gray-400 dark:text-gray-600"
-									>{$t('files.line', { line: contentMatch.line })}</span
+								<span
+									class="w-6 shrink-0 text-right text-[0.625rem] font-mono text-gray-400 dark:text-gray-600"
+									>{preview.line}</span
 								>
 								<span
-									class="min-w-0 truncate text-[0.6875rem] font-mono text-gray-600 dark:text-gray-400"
+									class="min-w-0 flex-1 truncate text-[0.6875rem] font-mono text-gray-500 dark:text-gray-500"
+									>{preview.text}</span
 								>
-									{#each highlightParts(contentMatch.text) as part}
-										<span
-											class={part.match ? 'font-semibold bg-amber-200/70 dark:bg-amber-400/20' : ''}
-											>{part.text}</span
-										>
-									{/each}
-								</span>
+								{#if match.content_matches.length > 1}
+									<span class="shrink-0 text-[0.625rem] text-gray-400 dark:text-gray-600"
+										>+{match.content_matches.length - 1}</span
+									>
+								{/if}
 							</button>
-						{/each}
+						{/if}
+					{/each}
+				{/snippet}
+
+				{#if filenameMatches.length > 0}
+					<div
+						class="px-2 pt-1 pb-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-600"
+					>
+						{$t('files.filenameMatches')}
 					</div>
-				{/each}
-				{#if matchesTruncated}
-					<p class="px-2 py-2 text-center text-[0.6875rem] text-gray-400 dark:text-gray-600">
-						{$t('files.searchTruncated')}
-					</p>
+					{@render resultRows(filenameMatches)}
+				{/if}
+
+				{#if contentOnlyMatches.length > 0}
+					<div
+						class="px-2 pt-2 pb-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-600"
+					>
+						{$t('files.contentMatches')}
+					</div>
+					{@render resultRows(contentOnlyMatches)}
+				{/if}
+				{#if nextMatchOffset !== null}
+					<div use:loadMoreOnVisible class="flex h-8 items-center justify-center">
+						{#if matchLoadingMore}
+							<Spinner size={12} />
+						{:else if matchLoadMoreError}
+							<button
+								class="text-[0.6875rem] text-gray-400 hover:text-gray-600 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-75"
+								onclick={retryMoreMatches}>{$t('files.retry')}</button
+							>
+						{/if}
+					</div>
 				{/if}
 			{/if}
 		{:else if visibleEntries.length === 0 && !showNewInput}

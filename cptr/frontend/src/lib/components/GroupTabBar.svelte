@@ -40,9 +40,15 @@
 		onTabDragOver?: () => void;
 		onHomeSelect?: (tabId: string) => void;
 		onHomeClose?: (tabId: string) => void;
+		onHomeReorder?: (oldIndex: number, newIndex: number) => void;
 		onHomeNewChat?: () => void;
 		onHomeNewTerminal?: () => void;
 		onHomeNewBrowser?: () => void;
+		onHomeSplit?: (direction: 'horizontal' | 'vertical') => void;
+		onHomeCloseGroup?: () => void;
+		homeSplitDirection?: 'horizontal' | 'vertical';
+		homeSplitActive?: boolean;
+		homeActive?: boolean;
 	}
 
 	let {
@@ -53,9 +59,15 @@
 		onTabDragOver,
 		onHomeSelect,
 		onHomeClose,
+		onHomeReorder,
 		onHomeNewChat,
 		onHomeNewTerminal,
-		onHomeNewBrowser
+		onHomeNewBrowser,
+		onHomeSplit,
+		onHomeCloseGroup,
+		homeSplitDirection = 'horizontal',
+		homeSplitActive = false,
+		homeActive = true
 	}: Props = $props();
 
 	let tabsEl: HTMLDivElement | undefined = $state();
@@ -81,7 +93,7 @@
 
 	const displayTabs = $derived((group?.tabs ?? []).filter((t) => t.type !== 'git'));
 
-	const isActiveGroup = $derived(home || $activeWorkspace?.activeGroupId === group?.id);
+	const isActiveGroup = $derived(home ? homeActive : $activeWorkspace?.activeGroupId === group?.id);
 
 	function tabIconName(tab: Tab): string {
 		switch (tab.type) {
@@ -119,6 +131,7 @@
 
 	function handleCloseGroup(e: Event) {
 		e.stopPropagation();
+		if (home) return onHomeCloseGroup?.();
 		closeGroup(group.id);
 	}
 
@@ -299,15 +312,20 @@
 	});
 
 	const splitMenuItems = $derived.by(() => {
-		const direction = $activeWorkspace?.splitDirection ?? 'horizontal';
+		const direction = home
+			? homeSplitDirection
+			: ($activeWorkspace?.splitDirection ?? 'horizontal');
 		return [
 			{
 				label: $t('bar.splitRight'),
 				icon: 'split-horizontal',
 				active: direction === 'horizontal',
 				onclick: () => {
-					setSplitDirection('horizontal');
-					splitCurrentTab('horizontal');
+					if (home) onHomeSplit?.('horizontal');
+					else {
+						setSplitDirection('horizontal');
+						splitCurrentTab('horizontal');
+					}
 				}
 			},
 			{
@@ -315,8 +333,11 @@
 				icon: 'split-vertical',
 				active: direction === 'vertical',
 				onclick: () => {
-					setSplitDirection('vertical');
-					splitCurrentTab('vertical');
+					if (home) onHomeSplit?.('vertical');
+					else {
+						setSplitDirection('vertical');
+						splitCurrentTab('vertical');
+					}
 				}
 			}
 		];
@@ -327,7 +348,7 @@
 	}
 
 	onMount(() => {
-		if (tabsEl && !home) {
+		if (tabsEl) {
 			sortable = Sortable.create(tabsEl, {
 				animation: 150,
 				ghostClass: 'tab-reorder-preview',
@@ -344,7 +365,8 @@
 				},
 				onEnd: (evt) => {
 					if (evt.oldIndex != null && evt.newIndex != null && evt.oldIndex !== evt.newIndex) {
-						reorderTabs(evt.oldIndex, evt.newIndex, group.id);
+						if (home) onHomeReorder?.(evt.oldIndex, evt.newIndex);
+						else reorderTabs(evt.oldIndex, evt.newIndex, group.id);
 					}
 				}
 			});
@@ -439,11 +461,11 @@
 	<!-- Right-side controls -->
 	<div class="flex items-center gap-0.5 shrink-0">
 		<!-- Split button (wide screens) -->
-		{#if isWideScreen && !home}
+		{#if isWideScreen}
 			<button
 				bind:this={splitBtnEl}
 				class="flex items-center justify-center w-7 h-7 rounded-lg transition-colors duration-100 shrink-0
-					{$splitActive
+					{(home ? homeSplitActive : $splitActive)
 					? 'bg-gray-200/50 text-gray-900 dark:bg-white/8 dark:text-white'
 					: 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}"
 				onclick={() => (showSplitMenu = !showSplitMenu)}
@@ -451,7 +473,7 @@
 				use:tooltip={$t('a11y.splitEditor')}
 			>
 				<Icon
-					name={$activeWorkspace?.splitDirection === 'vertical'
+					name={(home ? homeSplitDirection : $activeWorkspace?.splitDirection) === 'vertical'
 						? 'split-vertical'
 						: 'split-horizontal'}
 					size={14}
