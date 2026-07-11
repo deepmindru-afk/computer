@@ -11,6 +11,7 @@
 	import { openBrowserTab, updateTabLabel } from '$lib/stores';
 	import Icon from './Icon.svelte';
 	import ChromeBrowser from './ChromeBrowser.svelte';
+	import DropdownMenu from './DropdownMenu.svelte';
 	import Spinner from './common/Spinner.svelte';
 	import { t } from '$lib/i18n';
 
@@ -34,6 +35,35 @@
 	let chromeStatus = $state('');
 	let canGoBack = $state(false);
 	let canGoForward = $state(false);
+	let chromeQuality = $state<'low' | 'balanced' | 'crisp' | null>(null);
+	let qualityMenuOpen = $state(false);
+	let qualityMenuAnchor = $state<HTMLElement>();
+
+	function setChromeQuality(quality: 'low' | 'balanced' | 'crisp') {
+		chromeEl?.setQuality(quality);
+		chromeQuality = quality;
+	}
+
+	const qualityMenuItems = $derived([
+		{
+			label: $t('admin.browserQualityLow'),
+			onclick: () => setChromeQuality('low'),
+			active: chromeQuality === 'low',
+			check: true
+		},
+		{
+			label: $t('admin.browserQualityBalanced'),
+			onclick: () => setChromeQuality('balanced'),
+			active: chromeQuality === 'balanced',
+			check: true
+		},
+		{
+			label: $t('admin.browserQualityCrisp'),
+			onclick: () => setChromeQuality('crisp'),
+			active: chromeQuality === 'crisp',
+			check: true
+		}
+	]);
 
 	function publicUrl(value: string) {
 		const proxyUrl = new URL(value, location.origin);
@@ -127,7 +157,6 @@
 				updateTabLabel(tabId, title);
 				mode = session.mode || 'proxy';
 				if (mode === 'chrome') {
-					chromeStatus = 'connecting';
 					const supported =
 						'VideoDecoder' in window &&
 						(await VideoDecoder.isConfigSupported({ codec: 'avc1.42E028' })).supported;
@@ -194,8 +223,26 @@
 				use:tooltip={$t('port.openInNewTab')}>↗</a
 			>
 		</div>
+		{#if mode === 'chrome' && chromeQuality}
+			<button
+				bind:this={qualityMenuAnchor}
+				class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/6 dark:hover:text-gray-300"
+				aria-label={$t('admin.browserQuality')}
+				use:tooltip={$t('admin.browserQuality')}
+				onclick={() => (qualityMenuOpen = !qualityMenuOpen)}
+			>
+				<Icon name="three-dots" size={12} />
+			</button>
+		{/if}
 	</div>
-	{#if modeError}<div class="mode-error" title={modeError}>{modeError}</div>{/if}
+	{#if qualityMenuOpen && qualityMenuAnchor}
+		<DropdownMenu
+			items={qualityMenuItems}
+			anchor={qualityMenuAnchor}
+			align="end"
+			onclose={() => (qualityMenuOpen = false)}
+		/>
+	{/if}
 	<div class="preview-content">
 		{#if error}
 			<div class="preview-error">
@@ -217,22 +264,30 @@
 				onstatus={(status, message, nextMode) => {
 					chromeStatus = status;
 					if (message) modeError = message;
-					else if (status === 'playing' || status === 'view_only') modeError = '';
+					else if (status === 'playing') modeError = '';
 					if (nextMode === 'proxy') {
 						mode = 'proxy';
+						chromeQuality = null;
 						if (urlInput) frameSrc = browserFrameUrl(sessionId, urlInput);
 					}
 				}}
+				onquality={(quality) => (chromeQuality = quality)}
 			/>
-			{#if chromeStatus === 'connecting'}
+			{#if chromeStatus === 'reconnecting'}
 				<div
 					class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/80 text-xs text-gray-500 dark:bg-black/80 dark:text-gray-400"
 				>
 					<Spinner size={14} />
 					<span>{$t('common.loading')}</span>
 				</div>
+			{:else if chromeStatus === 'lost'}
+				<div
+					class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 bg-white/80 px-4 text-center text-xs text-gray-500 dark:bg-black/80 dark:text-gray-400"
+				>
+					<span class="font-medium">{$t('browser.connectionLost')}</span>
+					{#if modeError}<span class="max-w-md opacity-75">{modeError}</span>{/if}
+				</div>
 			{/if}
-			{#if chromeStatus === 'view_only'}<div class="status-pill">{$t('browser.viewOnly')}</div>{/if}
 		{:else}
 			<iframe
 				bind:this={iframeEl}
@@ -250,25 +305,6 @@
 
 <style>
 	@reference "../../app.css";
-	.mode-error {
-		padding: 0.2rem 0.5rem;
-		font-size: 0.6875rem;
-		color: var(--color-red-600);
-		background: color-mix(in srgb, var(--color-red-500) 8%, transparent);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.status-pill {
-		position: absolute;
-		top: 0.5rem;
-		right: 0.5rem;
-		padding: 0.2rem 0.45rem;
-		border-radius: 999px;
-		background: rgba(0, 0, 0, 0.65);
-		color: white;
-		font-size: 0.6875rem;
-	}
 	.preview-content {
 		flex: 1;
 		min-height: 0;

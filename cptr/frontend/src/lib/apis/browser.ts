@@ -12,10 +12,14 @@ export interface BrowserAvailability {
 	proxy: { available: true };
 	chrome: {
 		available: boolean;
-		browser_name: string | null;
-		experimental: true;
 		reason: string | null;
 	};
+}
+
+export interface PersonalChromeStatus {
+	status: 'disconnected' | 'connecting' | 'playing' | 'lost' | 'unavailable';
+	browser: string;
+	session_count: number;
 }
 
 let availabilityPromise: Promise<BrowserAvailability> | undefined;
@@ -61,3 +65,27 @@ export const browserFrameUrl = (sessionId: string, rawUrl: string) => {
 };
 
 export const browserBlankUrl = (sessionId: string) => `/api/browser/sessions/${sessionId}/blank`;
+
+export const clearManagedChromeProfile = () =>
+	fetchJSON<{ status: string; closed_session_ids: string[] }>('/api/browser/profile', {
+		method: 'DELETE'
+	});
+
+export const testBrowserCdp = (url: string) =>
+	fetchJSON<{ browser: string }>('/api/browser/cdp', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ url })
+	});
+
+export const getPersonalChrome = () => fetchJSON<PersonalChromeStatus>('/api/browser/personal');
+
+export const connectPersonalChrome = (url: string) =>
+	fetchJSON<PersonalChromeStatus>('/api/browser/personal', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ url })
+	});
+
+export const disconnectPersonalChrome = () =>
+	fetchJSON<PersonalChromeStatus>('/api/browser/personal', { method: 'DELETE' });

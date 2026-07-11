@@ -12,11 +12,11 @@
 
 ![Open WebUI Computer Demo](./demo.png)
 
-<sub>See more at [cptr.sh](https://cptr.sh/)</sub>
-
 Open WebUI Computer (`cptr`) runs on your machine and serves your whole computer to any browser: files, terminal, editor, git, running sessions, AI agents, and tools. It literally is your computer.
 
 Use it from your phone, tablet, laptop, another computer, or the machine it's running on. Designed to feel native on every screen. Connect your own AI via API key, plug in a coding agent you already subscribe to, or work directly in the terminal. One tool, full workstation, any device.
+
+> Start here: [Open WebUI Computer docs](https://docs.openwebui.com/ecosystem/computer/)
 
 ## Install
 
@@ -101,11 +101,11 @@ Bring your own API key (OpenAI, Anthropic, Ollama, or any OpenAI-compatible endp
 
 Use the subscriptions you already pay for as native backends on your own machine. No separate API key needed.
 
-**Codex** · **Claude Code** · **Cursor** · **Grok** · **OpenCode** · **Cline** · **Pi**
+**Codex** · **Claude Code** · **Cursor** · **Grok** · **OpenCode** · **Cline** · **Gemini** · **Pi**
 
 Add an agent profile from Settings, pick your models, and it shows up in the model selector like any other provider. Conversations run inside your workspace with full tool access and resume where you left off.
 
-Prefer to run agents yourself? Any terminal agent (Gemini CLI, Kilo Code, Pi, and others) works in the terminal tab the way it always has.
+Prefer to run agents yourself? Any terminal agent (Kilo Code, Pi, and others) works in the terminal tab the way it always has.
 
 ## Messaging bots
 
