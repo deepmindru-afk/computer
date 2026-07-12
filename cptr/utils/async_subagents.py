@@ -160,6 +160,14 @@ async def _finalize(
         snapshot = {k: v for k, v in record.items() if k != "task"}
         _prune_completed_locked()
 
+    if snapshot.get("timer_chat_id"):
+        from cptr.utils.timers import set_timer_completion
+
+        try:
+            await set_timer_completion(snapshot, status, error)
+        except Exception:
+            logger.exception("Failed to record timer completion %s", delegation_id)
+
     injector = _completion_injector_override or _inject_completion
     try:
         await injector(snapshot)
@@ -194,6 +202,7 @@ async def _inject_completion(record: dict[str, Any]) -> None:
     from cptr.utils.chat_task import get_pending_input_lock, start_task
 
     assistant_msg = None
+    direct_timer_completion = False
     async with get_pending_input_lock(parent_chat_id):
         all_msgs = await ChatMessage.get_all_by_chat(parent_chat_id)
         active = any(m.role == "assistant" and not m.done for m in all_msgs)
@@ -208,29 +217,55 @@ async def _inject_completion(record: dict[str, Any]) -> None:
         if active:
             meta["async_subagent_pending"] = True
 
-        user_msg = await ChatMessage.create(
-            chat_id=parent_chat_id,
-            role="user",
-            content=content,
-            parent_id=parent_id,
-            model=model_id,
-            meta=meta,
-            created_at=now_ms(),
-        )
-
-        if not active:
+        if record.get("timer_chat_id") and not active:
+            direct_timer_completion = True
+            meta["timer_completion"] = True
             assistant_msg = await ChatMessage.create(
                 chat_id=parent_chat_id,
                 role="assistant",
-                content="",
-                parent_id=user_msg.id,
+                content=record.get("summary") or "Timer completed.",
+                parent_id=parent_id,
                 model=model_id,
-                done=False,
+                done=True,
+                meta=meta,
                 created_at=now_ms(),
             )
             await Chat.update_current_message(parent_chat_id, assistant_msg.id, now_ms())
+        else:
+            user_msg = await ChatMessage.create(
+                chat_id=parent_chat_id,
+                role="user",
+                content=content,
+                parent_id=parent_id,
+                model=model_id,
+                meta=meta,
+                created_at=now_ms(),
+            )
+
+            if not active:
+                assistant_msg = await ChatMessage.create(
+                    chat_id=parent_chat_id,
+                    role="assistant",
+                    content="",
+                    parent_id=user_msg.id,
+                    model=model_id,
+                    done=False,
+                    created_at=now_ms(),
+                )
+                await Chat.update_current_message(parent_chat_id, assistant_msg.id, now_ms())
 
     await export_chat_to_file(parent_chat_id)
+    if direct_timer_completion:
+        await emit_to_user(
+            user_id,
+            {
+                "chat_id": parent_chat_id,
+                "message_id": assistant_msg.id,
+                "pending_inputs_processed": True,
+            },
+        )
+        return
+
     if not assistant_msg:
         await emit_to_user(
             user_id,
