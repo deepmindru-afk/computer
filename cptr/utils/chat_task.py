@@ -167,7 +167,9 @@ PLAN_MODE_PROMPT = (
     "[Plan Mode] Research with read-only tools before planning. When a material decision "
     "cannot be discovered, use ask_user with one to three questions, two to three options "
     "each, and the recommended option first. Ask only after research and never alongside "
-    "another tool call. Then present your plan using create_artifact. Wait for an explicit "
+    "another tool call. Then present a concise plan in your response. Use create_artifact "
+    "only when a substantial plan or analysis benefits from being saved for review. Wait for "
+    "an explicit "
     "approval message before using write tools or implementing."
 )
 
@@ -1955,7 +1957,6 @@ async def run_chat_task(
         if plan_mode:
             tools = [t for t in tools if ALL_TOOLS.get(t["name"], {}).get("auto")]
             tools = [t for t in tools if t["name"] not in {"delegate_task", "update_memory"}]
-            # Inject create_artifact (only available in plan mode)
             tools.append(_fn_to_schema("create_artifact", create_artifact))
             tools.append(ASK_USER_SCHEMA)
             messages.append({"role": "user", "content": PLAN_MODE_PROMPT})
@@ -2119,6 +2120,7 @@ async def run_chat_task(
 
             restart = False
             pending_calls: list[dict] = []  # Collect tool calls from this response
+            pending_call_ids: set[str] = set()
             response_reasoning_items: list[dict] = []  # Pair with tool outputs on the next request
             streamed_reasoning_chars = 0
 
@@ -2131,6 +2133,16 @@ async def run_chat_task(
 
                 elif event["type"] == "tool_call":
                     # Collect tool call — don't execute yet
+                    call_id = event["call_id"]
+                    if call_id in pending_call_ids:
+                        logger.warning(
+                            "[task %s] ignoring duplicate tool call id=%s name=%s",
+                            message_id[:8],
+                            call_id,
+                            event["name"],
+                        )
+                        continue
+                    pending_call_ids.add(call_id)
                     pending_calls.append(event)
 
                 elif event["type"] in ("output", "reasoning"):

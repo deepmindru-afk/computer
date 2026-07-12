@@ -945,7 +945,10 @@ export function openFileTab(
 	options: { edit?: boolean; searchTarget?: FileSearchTarget } = {}
 ): void {
 	const ws = get(currentWorkspace);
-	if (!ws) return;
+	if (!ws) {
+		openHomeFileTab(filePath, targetGroupId, options);
+		return;
+	}
 
 	const gid = targetGroupId ?? ws.activeGroupId;
 	const group = ws.groups.find((g) => g.id === gid);
@@ -982,6 +985,37 @@ export function openFileTab(
 	updateGroupTabs(gid, (tabs) => ({
 		tabs: [...tabs, newTab],
 		activeTabId: newTab.id
+	}));
+}
+
+function openHomeFileTab(
+	filePath: string,
+	targetGroupId?: string,
+	options: { edit?: boolean; searchTarget?: FileSearchTarget } = {}
+): void {
+	const state = get(homeState);
+	const groupId = targetGroupId ?? state.activeGroupId;
+	const group = state.groups.find((item) => item.id === groupId);
+	if (!group) return;
+
+	const existing = group.tabs.find((tab) => tab.type === 'file' && tab.filePath === filePath);
+	const tab: Tab = existing ?? {
+		id: nextId(),
+		type: 'file',
+		label: getPathDisplayName(filePath, filePath),
+		filePath,
+		edit: options.edit,
+		searchTarget: options.searchTarget
+	};
+	const updateGroup = (group: EditorGroup) =>
+		group.id === groupId
+			? { ...group, tabs: existing ? group.tabs : [...group.tabs, tab], activeTabId: tab.id }
+			: group;
+
+	homeState.update((current) => ({
+		...current,
+		activeGroupId: groupId,
+		groups: current.groups.map(updateGroup)
 	}));
 }
 
