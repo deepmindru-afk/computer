@@ -69,6 +69,8 @@ ASK_USER_SCHEMA = {
         "properties": {
             "questions": {
                 "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
                 "items": {
                     "type": "object",
                     "properties": {
@@ -77,6 +79,8 @@ ASK_USER_SCHEMA = {
                         "question": {"type": "string"},
                         "options": {
                             "type": "array",
+                            "minItems": 2,
+                            "maxItems": 3,
                             "items": {
                                 "type": "object",
                                 "properties": {
@@ -90,7 +94,12 @@ ASK_USER_SCHEMA = {
                     "required": ["id", "header", "question", "options"],
                 },
             },
-            "autoResolutionMs": {"type": "integer"},
+            "autoResolutionMs": {
+                "type": "integer",
+                "minimum": 60_000,
+                "maximum": 240_000,
+                "default": DEFAULT_AUTO_RESOLUTION_MS,
+            },
         },
         "required": ["questions"],
     },
@@ -99,8 +108,10 @@ ASK_USER_SCHEMA = {
 
 def validate_ask_user_request(arguments: dict[str, Any]) -> dict[str, Any]:
     questions = arguments.get("questions")
-    if not isinstance(questions, list) or not 1 <= len(questions) <= 3:
+    if not isinstance(questions, list) or not questions:
         raise ValueError("ask_user requires one to three questions")
+    questions = questions[:3]
+    normalized_questions = []
     ids: set[str] = set()
     for question in questions:
         if not isinstance(question, dict):
@@ -114,8 +125,9 @@ def validate_ask_user_request(arguments: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("question ids must be unique")
         ids.add(question["id"])
         options = question.get("options")
-        if not isinstance(options, list) or not 2 <= len(options) <= 3:
+        if not isinstance(options, list) or len(options) < 2:
             raise ValueError("each question requires two or three options")
+        options = options[:3]
         if any(
             not isinstance(option, dict)
             or not isinstance(option.get("label"), str)
@@ -125,14 +137,15 @@ def validate_ask_user_request(arguments: dict[str, Any]) -> dict[str, Any]:
             for option in options
         ):
             raise ValueError("each option needs a label and description")
+        normalized_questions.append({**question, "options": options})
     timeout = arguments.get("autoResolutionMs", DEFAULT_AUTO_RESOLUTION_MS)
     if (
         isinstance(timeout, bool)
         or not isinstance(timeout, int)
         or not 60_000 <= timeout <= 240_000
     ):
-        raise ValueError("autoResolutionMs must be between 60000 and 240000")
-    return {"questions": questions, "autoResolutionMs": timeout}
+        timeout = DEFAULT_AUTO_RESOLUTION_MS
+    return {"questions": normalized_questions, "autoResolutionMs": timeout}
 
 
 def ask_user_answers(
@@ -2279,7 +2292,13 @@ async def run_chat_task(
                     _task_state.pop(message_id, None)
 
                     async def auto_answer():
-                        await asyncio.sleep(arguments["autoResolutionMs"] / 1000)
+                        from cptr.socket.main import is_chat_visible
+
+                        remaining = arguments["autoResolutionMs"] / 1000
+                        while remaining > 0:
+                            await asyncio.sleep(1)
+                            if not is_chat_visible(user_id, chat_id):
+                                remaining -= 1
                         from cptr.app import app
                         from cptr.routers.chat import AskUserNotPendingError, resolve_ask_user
 
