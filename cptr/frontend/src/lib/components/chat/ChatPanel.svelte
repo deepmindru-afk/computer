@@ -26,9 +26,11 @@
 	import {
 		chatModels,
 		defaultModel,
+		setChatReadAt,
 		streamingChatTabs,
 		registerStreamingChat,
-		unregisterStreamingChat
+		unregisterStreamingChat,
+		updateChatStatuses
 	} from '$lib/stores/chat';
 	import { socketStore } from '$lib/stores/socket.svelte';
 	import { onMount, onDestroy, tick } from 'svelte';
@@ -383,10 +385,17 @@
 	// ── Load chat from DB ───────────────────────────────────────
 
 	let loadGeneration = 0;
+	let loadedChatId = $state<string | null>(null);
+
+	function markChatRead(id: string) {
+		setChatReadAt(id);
+		socketStore.getSocket()?.emit('chat:read', { chat_id: id });
+	}
 
 	async function loadChat(id: string) {
 		if (chatId && chatId !== id) stopTtsPlayback();
 		chatId = id;
+		loadedChatId = null;
 		const gen = ++loadGeneration;
 		// Only show loading spinner on initial load (no messages yet).
 		// On reloads (e.g. after cancel/done), keep the DOM intact to preserve scroll position.
@@ -416,6 +425,8 @@
 				chatTitle = data.chat.title;
 				updateTab(tabId, id, data.chat.title);
 			}
+			loadedChatId = id;
+			updateChatStatuses([data.chat], workspace);
 		} finally {
 			if (isInitialLoad && gen === loadGeneration) loading = false;
 		}
@@ -753,7 +764,23 @@
 	$effect(() => {
 		if (!chatId || !tabId) return;
 		registerStreamingChat(chatId, tabId);
-		return () => unregisterStreamingChat(chatId!);
+		return () => unregisterStreamingChat(chatId!, tabId!);
+	});
+
+	// ── Persist read state separately from visibility tracking ──
+
+	$effect(() => {
+		if (!chatId || loadedChatId !== chatId || !active) return;
+		const id = chatId;
+		const send = () => markChatRead(id);
+		send();
+		return socketStore.on('connect', send);
+	});
+
+	$effect(() => {
+		if (!chatId || !active) return;
+		const id = chatId;
+		return () => markChatRead(id);
 	});
 
 	$effect(() => {

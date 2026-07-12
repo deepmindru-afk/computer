@@ -5,16 +5,26 @@
 	 * and an optional context menu button.
 	 */
 	import type { ChatInfo } from '$lib/apis/chat';
+	import { chatStatuses, isChatUnread } from '$lib/stores/chat';
 	import Spinner from './Spinner.svelte';
 	import { t } from '$lib/i18n';
 
 	interface Props {
 		chat: ChatInfo;
+		isSelected?: boolean;
 		onclick: () => void;
 		/** Optional menu button click handler */
 		onmenu?: (e: MouseEvent) => void;
 	}
-	let { chat, onclick, onmenu }: Props = $props();
+	let { chat, isSelected = false, onclick, onmenu }: Props = $props();
+	let status = $derived($chatStatuses.get(chat.id));
+	let active = $derived(status?.active ?? chat.is_active ?? false);
+	let unread = $derived(
+		!isSelected &&
+			(status
+				? isChatUnread(status)
+				: !active && (chat.last_read_at === null || chat.updated_at > chat.last_read_at))
+	);
 
 	function formatTime(ts: number): string {
 		const now = Date.now();
@@ -44,10 +54,17 @@
 	}}
 	title={chat.title}
 >
-	{#if chat.is_active}
+	{#if active}
 		<Spinner size={10} borderWidth={1.5} class="opacity-50" />
 	{/if}
-	<span class="flex-1 text-xs text-gray-500 dark:text-gray-500 truncate min-w-0">{chat.title}</span>
+	{#if unread}
+		<span class="size-1.5 shrink-0 rounded-full bg-sky-500" aria-hidden="true"></span>
+	{/if}
+	<span
+		class="flex-1 text-xs truncate min-w-0 {unread
+			? 'font-medium text-gray-900 dark:text-gray-100'
+			: 'text-gray-500 dark:text-gray-500'}">{chat.title}</span
+	>
 	<span class="text-[0.625rem] text-gray-300 dark:text-gray-700 shrink-0 tabular-nums"
 		>{formatTime(chat.updated_at)}</span
 	>
