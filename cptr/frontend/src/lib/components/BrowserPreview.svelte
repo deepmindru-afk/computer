@@ -55,6 +55,7 @@
 	let qualityMenuAnchor = $state<HTMLElement>();
 
 	function updateLabel(label: string) {
+		if (!label.trim()) return;
 		if (onTabUpdate) onTabUpdate(label);
 		else updateTabLabel(tabId, label);
 	}
@@ -415,7 +416,7 @@
 		height: 100%;
 		border: 0;
 		display: block;
-		background: white;
+		background: var(--app-bg);
 	}
 	.preview-error {
 		height: 100%;
