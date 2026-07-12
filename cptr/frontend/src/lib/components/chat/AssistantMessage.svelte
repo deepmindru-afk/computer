@@ -17,6 +17,7 @@
 
 	interface Props {
 		content: string;
+		meta?: Record<string, any> | null;
 		done: boolean;
 		output: any[] | null;
 		usage: Record<string, number> | null;
@@ -35,6 +36,7 @@
 	}
 	let {
 		content,
+		meta = null,
 		done,
 		output,
 		usage,
