@@ -46,6 +46,7 @@ def should_compact(
     """
     resolved_threshold = threshold or _get_threshold()
 
+    last_usage = normalize_usage(last_usage)
     if last_usage and last_usage.get("input_tokens"):
         # Real base from last API call + estimate only new additions
         base = last_usage["input_tokens"] + last_usage.get("output_tokens", 0)
@@ -59,7 +60,7 @@ def should_compact(
     return total > resolved_threshold
 
 
-def build_context_usage(tokens: int, *, threshold: int | None = None, source: str) -> dict:
+def build_context_usage(tokens: int, *, threshold: int | None = None) -> dict:
     """Return context fullness stats for estimated token counts."""
     resolved_threshold = threshold or _get_threshold()
     percent = round((tokens / resolved_threshold) * 100) if resolved_threshold > 0 else 0
@@ -68,8 +69,37 @@ def build_context_usage(tokens: int, *, threshold: int | None = None, source: st
         "estimated_tokens": tokens,
         "threshold": resolved_threshold,
         "percent": max(0, percent),
-        "source": source,
     }
+
+
+def normalize_usage(usage: dict | None) -> dict | None:
+    """Return provider usage with cptr's canonical token field names."""
+    if not usage:
+        return None
+    normalized = dict(usage)
+    input_tokens = _parse_nonnegative_int(
+        normalized.get("input_tokens", normalized.get("prompt_tokens"))
+    )
+    output_tokens = _parse_nonnegative_int(
+        normalized.get("output_tokens", normalized.get("completion_tokens"))
+    )
+    total_tokens = _parse_nonnegative_int(normalized.get("total_tokens"))
+    if total_tokens == 0:
+        total_tokens = input_tokens + output_tokens
+    normalized["input_tokens"] = input_tokens
+    normalized["output_tokens"] = output_tokens
+    normalized["total_tokens"] = total_tokens
+    return normalized
+
+
+def usage_context_tokens(usage: dict | None) -> int:
+    """Best available context token count from normalized or provider usage."""
+    usage = normalize_usage(usage)
+    if not usage:
+        return 0
+    if usage.get("input_tokens"):
+        return usage["input_tokens"] + usage.get("output_tokens", 0)
+    return usage.get("total_tokens", 0)
 
 
 def estimate_context_usage(
@@ -78,7 +108,7 @@ def estimate_context_usage(
     """Return context fullness stats using the same estimate as compaction."""
     resolved_threshold = threshold or _get_threshold()
     estimated_tokens = estimate_tokens(system_prompt) + estimate_messages_tokens(messages)
-    return build_context_usage(estimated_tokens, threshold=resolved_threshold, source="estimated")
+    return build_context_usage(estimated_tokens, threshold=resolved_threshold)
 
 
 def _parse_positive_int(value: object) -> int | None:
@@ -87,6 +117,14 @@ def _parse_positive_int(value: object) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _parse_nonnegative_int(value: object) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
 
 
 def resolve_compact_token_threshold(

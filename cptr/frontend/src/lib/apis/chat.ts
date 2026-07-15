@@ -34,7 +34,6 @@ export interface ContextUsage {
 	estimated_tokens: number;
 	threshold: number;
 	percent: number;
-	source: 'estimated';
 }
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
@@ -171,8 +170,11 @@ export const answerAskUser = (
 export const cancelTask = (chatId: string, messageId: string) =>
 	fetchJSON(`/api/chats/${chatId}/messages/${messageId}/cancel`, { method: 'POST' });
 
-export const compactChat = (chatId: string, modelId: string) =>
-	fetchJSON<CompactChatResult>(`/api/chats/${chatId}/compact`, jsonBody({ model_id: modelId }));
+export const compactChat = (chatId: string, modelId?: string | null) =>
+	fetchJSON<CompactChatResult>(
+		`/api/chats/${chatId}/compact`,
+		jsonBody({ model_id: modelId || null })
+	);
 
 export const updateCurrentMessage = (chatId: string, messageId: string) =>
 	fetchJSON<{ ok: boolean }>(`/api/chats/${chatId}/current`, jsonBody({ message_id: messageId }));

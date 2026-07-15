@@ -16,11 +16,14 @@ import inspect
 import json
 import mimetypes
 import os
+import stat
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal, Optional, get_args, get_origin, get_type_hints
+
 from cptr.env import CHAT_TOOL_COMMAND_MAX_CHARS, CHAT_TOOL_MAX_CHARS, EXECUTE_TIMEOUT
+from cptr.utils.gitignore import is_gitignored, load_gitignore
 
 try:
     import fcntl
@@ -224,10 +227,31 @@ async def stream_command_session_output(command_session_id: str):
 
 def _is_dotenv(path: Path) -> bool:
     """Return True if the path refers to a .env file (e.g. .env, .env.local)."""
-    return path.name == ".env" or path.name.startswith(".env.")
+    return path.name == ".env" or path.name == ".envrc" or path.name.startswith(".env.")
 
 
 _DOTENV_ERROR = "Error: access to .env files is not allowed for security reasons."
+
+_SENSITIVE_READ_ERROR = "Error: access to credential files is not allowed for security reasons."
+
+_SENSITIVE_HOME_FILES = {
+    ".git-credentials",
+    ".netrc",
+    ".npmrc",
+    ".pgpass",
+    ".pypirc",
+}
+
+_SENSITIVE_HOME_DIRS = {
+    ".aws",
+    ".config/gh",
+    ".config/gcloud",
+    ".config/op",
+    ".docker",
+    ".gnupg",
+    ".kube",
+    ".ssh",
+}
 
 
 def _human_size(size: int) -> str:
@@ -482,14 +506,39 @@ async def read_file(
     workspace: str,
 ) -> str:
     """Read file contents with optional line range. Lines are 1-indexed.
-    Supports absolute paths for user-attached files.
-    :param path: Path relative to workspace root, or absolute path for attached files.
+    Supports relative workspace paths, absolute paths, and ~/ paths.
+    Blocks .env, common credential files, and special device/socket files.
+    :param path: Path relative to workspace root, absolute path, or ~/ path.
     :param start_line: First line to read (1-indexed, 0 = from beginning).
     :param end_line: Last line to read (inclusive, 0 = to end of file).
     """
-    full = _resolve_path(path, workspace)
+    p = Path(path).expanduser()
+    if p.is_absolute():
+        full = p.resolve()
+    else:
+        ws = Path(workspace).resolve()
+        full = (ws / path).resolve()
+        if not full.is_relative_to(ws):
+            raise ValueError(f"Path traversal rejected: {path}")
+
     if _is_dotenv(full):
         return _DOTENV_ERROR
+
+    resolved = full.resolve()
+    home = Path.home().resolve()
+    home_rel = resolved.relative_to(home).as_posix() if resolved.is_relative_to(home) else ""
+    if home_rel in _SENSITIVE_HOME_FILES or any(
+        home_rel == d or home_rel.startswith(f"{d}/") for d in _SENSITIVE_HOME_DIRS
+    ):
+        return _SENSITIVE_READ_ERROR
+
+    try:
+        mode = full.stat().st_mode
+    except OSError:
+        mode = 0
+    if any(check(mode) for check in (stat.S_ISBLK, stat.S_ISCHR, stat.S_ISFIFO, stat.S_ISSOCK)):
+        return f"Error: cannot read special file: {full}"
+
     if not full.is_file():
         return f"Error: file not found: {path}"
 
@@ -716,13 +765,22 @@ async def _search_python(query: str, full: Path, case_insensitive: bool) -> str:
     def _walk_and_search():
         results = []
         ignore = {".git", "node_modules", "__pycache__", ".venv", "venv"}
+        ignore_base, ignore_patterns = load_gitignore(full)
         q = query.lower() if case_insensitive else query
 
         for root, dirs, files in os.walk(full):
-            dirs[:] = [d for d in dirs if d not in ignore]
+            root_path = Path(root)
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in ignore
+                and not is_gitignored(root_path / d, ignore_base, ignore_patterns, is_dir=True)
+            ]
             for fname in files:
                 fpath = Path(root) / fname
-                if _is_dotenv(fpath):
+                if _is_dotenv(fpath) or is_gitignored(
+                    fpath, ignore_base, ignore_patterns, is_dir=False
+                ):
                     continue
                 text = _read_text_for_search(fpath)
                 if text is None:
@@ -767,7 +825,7 @@ async def create_file(
         artifact_path = artifact_dir / f"{ts}_{artifact_type}.md"
 
         def _write_artifact():
-            artifact_path.write_text(content)
+            artifact_path.write_text(content, encoding="utf-8")
 
         await asyncio.to_thread(_write_artifact)
 
@@ -793,7 +851,7 @@ async def create_file(
 
     def _write():
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(content)
+        full.write_text(content, encoding="utf-8")
 
     await asyncio.to_thread(_write)
     return f"Created {path} ({len(content)} bytes, {len(content.splitlines())} lines)"
@@ -820,7 +878,7 @@ async def create_artifact(
     artifact_path = artifact_dir / f"{ts}_{artifact_type}.md"
 
     def _write():
-        artifact_path.write_text(content)
+        artifact_path.write_text(content, encoding="utf-8")
 
     await asyncio.to_thread(_write)
 
@@ -972,7 +1030,7 @@ async def write_file(path: str, content: str, *, workspace: str) -> str:
 
     def _write():
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(content)
+        full.write_text(content, encoding="utf-8")
 
     await asyncio.to_thread(_write)
     return f"Wrote {len(content)} bytes to {path}"
@@ -1043,7 +1101,7 @@ async def edit_file(
         return f"Error: file not found: {path}"
 
     def _edit():
-        content = full.read_text(errors="replace")
+        content = full.read_text(encoding="utf-8", errors="replace")
 
         if start_line > 0 or end_line > 0:
             lines = content.splitlines(keepends=True)
@@ -1075,7 +1133,7 @@ async def edit_file(
                 )
             new_content = content.replace(target, replacement, 1)
 
-        full.write_text(new_content)
+        full.write_text(new_content, encoding="utf-8")
         return None  # success sentinel
 
     result = await asyncio.to_thread(_edit)
@@ -1115,7 +1173,7 @@ async def multi_edit_file(
         return "Error: edits must be a non-empty JSON array"
 
     def _apply():
-        content = full.read_text(errors="replace")
+        content = full.read_text(encoding="utf-8", errors="replace")
         applied = 0
 
         for i, edit in enumerate(edit_list):
@@ -1138,7 +1196,7 @@ async def multi_edit_file(
             content = content.replace(target, replacement, 1)
             applied += 1
 
-        full.write_text(content)
+        full.write_text(content, encoding="utf-8")
         return f"Applied {applied} edits to {path}"
 
     return await asyncio.to_thread(_apply)
@@ -1358,19 +1416,18 @@ def _resolve_path(path: str, workspace: str) -> Path:
     # Allow absolute paths to the uploads directory (for user-attached files)
     if p.is_absolute():
         full = p.resolve()
-        uploads = str(UPLOADS_DIR.resolve())
-        ws = str(Path(workspace).resolve())
-        if str(full).startswith(uploads) or str(full).startswith(ws):
+        uploads = UPLOADS_DIR.resolve()
+        ws = Path(workspace).resolve()
+        if full.is_relative_to(uploads) or full.is_relative_to(ws):
             return full
         raise ValueError(f"Path outside allowed directories: {path}")
 
     # Relative paths resolve against workspace
     ws = Path(workspace).resolve()
     full = (ws / path).resolve()
-    if not str(full).startswith(str(ws)):
+    if not full.is_relative_to(ws):
         raise ValueError(f"Path traversal rejected: {path}")
     return full
-
 
 async def create_automation(
     name: str,
@@ -1605,11 +1662,13 @@ _activated_skills: set[str] = set()
 
 async def view_skill(
     skill_name: str,
+    file_path: str = "",
     *,
     workspace: str,
 ) -> str:
     """Load the full instructions and resource listing for an available skill.
     :param skill_name: The name of the skill to load (from the <available_skills> catalog).
+    :param file_path: Optional relative path to a bundled skill file (for example references/api.md).
     """
     from cptr.models import Config
     from cptr.utils.skills import bump_skill_view, load_skill, format_skill_content
@@ -1617,13 +1676,50 @@ async def view_skill(
     if (await Config.get("skills.enabled")) in (False, "false", "0"):
         return "Error: skills are disabled by the administrator."
 
-    # Deduplication: if already activated, return short notice
-    if skill_name in _activated_skills:
-        return f"Skill '{skill_name}' is already loaded in this session. Refer to the existing <skill_content> above."
-
     skill = load_skill(workspace, skill_name)
     if not skill:
         return f"Error: skill '{skill_name}' not found. Check <available_skills> for valid names."
+
+    if file_path:
+        skill_dir = Path(skill.location).parent
+        p = Path(file_path)
+        windows_path = PureWindowsPath(file_path)
+        if p.is_absolute() or windows_path.is_absolute() or windows_path.drive:
+            return "Error: skill file path must be relative to the skill directory."
+        if ".." in p.parts or ".." in windows_path.parts:
+            return "Error: skill file path cannot contain '..' traversal components."
+
+        target = (skill_dir / file_path).resolve()
+        try:
+            target.relative_to(skill_dir.resolve())
+        except (ValueError, OSError):
+            return "Error: skill file path escapes the skill directory."
+        if _is_dotenv(target):
+            return _DOTENV_ERROR
+        if not target.is_file():
+            return f"Error: skill file not found: {file_path}"
+        if target.suffix.lower() in IMAGE_EXTENSIONS:
+            return await asyncio.to_thread(_read_image_file, target, file_path)
+
+        def _read_skill_file():
+            size = target.stat().st_size
+            if size > 500_000:
+                return f"Error: skill file too large ({size} bytes, max 500KB)"
+            try:
+                content = target.read_text(errors="strict")
+            except (UnicodeDecodeError, ValueError):
+                return f"Error: binary skill file ({target.suffix}), cannot read as text"
+            return (
+                f'<skill_file name="{skill.name}" path="{file_path}">\n'
+                f"{content}\n"
+                "</skill_file>"
+            )
+
+        return await asyncio.to_thread(_read_skill_file)
+
+    # Deduplication: if already activated, return short notice
+    if skill_name in _activated_skills:
+        return f"Skill '{skill_name}' is already loaded in this session. Refer to the existing <skill_content> above."
 
     _activated_skills.add(skill_name)
     bump_skill_view(workspace, skill_name, skill.source)
@@ -1805,15 +1901,24 @@ async def browser_type(ref: str, text: str, *, __context__: dict) -> str:
     return await client.snapshot()
 
 
-async def browser_screenshot(*, __context__: dict) -> str:
-    """Take a screenshot of the current browser page. Saves the image to the workspace."""
+async def browser_screenshot(
+    width: Optional[int] = None, height: Optional[int] = None, *, __context__: dict
+) -> str:
+    """Take a screenshot of the current browser page. Saves the image to the workspace.
+    :param width: Optional screenshot viewport width in CSS pixels.
+    :param height: Optional screenshot viewport height in CSS pixels.
+    """
     cfg = await _get_browser_config()
     if cfg.get("provider", "local") != "local":
         return "Error: browser_screenshot requires Local CDP provider."
+    if (width is None) != (height is None):
+        return "Error: browser_screenshot width and height must be provided together."
+    if width is not None and height is not None and (width <= 0 or height <= 0):
+        return "Error: browser_screenshot width and height must be positive integers."
 
     chat_id = __context__.get("chat_id", "default")
     client = await _get_cdp_session(chat_id)
-    png_bytes = await client.screenshot()
+    png_bytes = await client.screenshot(width=width, height=height)
 
     # Save to workspace
     workspace = __context__.get("workspace", ".")
