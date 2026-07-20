@@ -13,7 +13,7 @@
 	let { onsettings, onsysteminfo }: Props = $props();
 	let showMenu = $state(false);
 	let menuButtonEl: HTMLButtonElement | undefined = $state();
-	const FEATURE_REQUEST_URL = 'https://github.com/open-webui/computer/issues/new/choose';
+	const FEATURE_REQUEST_URL = 'https://www.portalos.ru';
 
 	function openSettings(tab?: string) {
 		showMenu = false;
