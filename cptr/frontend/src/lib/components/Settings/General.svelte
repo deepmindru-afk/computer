@@ -18,21 +18,17 @@
 
 	let { showPwaSettings = false }: Props = $props();
 
-	const REPO_URL = 'https://github.com/open-webui/computer';
+	const REPO_URL = 'https://github.com/deepmindru-afk/computer';
 	const SHARE_TEXT = 'Check out Computer. Your computer, from anywhere.';
 
 	const shareLinks = [
 		{
-			label: 'X',
-			href: `https://x.com/intent/tweet?text=${encodeURIComponent(SHARE_TEXT)}&url=${encodeURIComponent(REPO_URL)}`
+			label: 'Portalos',
+			href: `https://portalos.ru`
 		},
 		{
-			label: 'Reddit',
-			href: `https://reddit.com/submit?url=${encodeURIComponent(REPO_URL)}&title=${encodeURIComponent(SHARE_TEXT)}`
-		},
-		{
-			label: 'LinkedIn',
-			href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(REPO_URL)}`
+			label: 'Portalos',
+			href: `https://portalos.ru`
 		}
 	];
 
@@ -173,7 +169,7 @@
 			</h3>
 			<p class="text-[0.6875rem] text-gray-500 leading-relaxed font-mono whitespace-pre-line">
 				<a
-					href="https://github.com/open-webui/computer/blob/main/LICENSE"
+					href="https://www.portalos.ru"
 					target="_blank"
 					rel="noopener noreferrer"
 					class="underline hover:text-gray-700 dark:hover:text-gray-300"
