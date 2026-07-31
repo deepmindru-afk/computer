@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.18] - 2026-07-31
+
+### Added
+
+- ⌨️ **Approve or reject tool requests from the keyboard.** Tool approval shortcuts are now available in Keyboard settings, so you can keep a chat moving without reaching for the mouse.
+
+### Fixed
+
+- 🧰 **Tool requests continue more smoothly.** When a chat asks for permission to use tools, Computer now keeps the request in order, picks up where it left off after your choice, and handles rejected tools more cleanly.
+- 💬 **Chat shortcuts stay out of the way.** Shortcuts that only apply to an active tool request now leave the rest of the app alone when there is nothing to approve or reject.
+- 💬 **Open WebUI chat titles are more reliable.** New chats started through Open WebUI now get cleaner titles from the first message.
+
+## [0.9.17] - 2026-07-31
+
+### Changed
+
+- 🤖 **Agent chats remember more when they start.** Codex and Claude Code now get helpful recent context at the beginning of a session, so follow-up requests are less likely to feel disconnected.
+- 💬 **Open WebUI conversations carry over more naturally.** When a chat starts through Open WebUI, Computer now brings along earlier messages before answering the latest one.
+
+### Fixed
+
+- 🔔 **Task notifications are clearer when Computer needs you.** Notifications now say when a task is waiting for approval or an answer, with wording in every supported language.
+
+## [0.9.16] - 2026-07-31
+
+### Added
+
+- 🧰 **Tool servers can now carry their own environment settings.** Add extra environment values for local tool servers from Admin, with matching translations across supported languages.
+- 🌐 **OpenCode over Docker is easier to set up.** The README now shows how to connect a host-running OpenCode server from a Docker install.
+
+### Changed
+
+- 🤖 **Claude Code conversations continue more smoothly.** Computer keeps Claude Code sessions warm between turns when the setup is unchanged, so follow-up prompts feel more natural.
+- 🧭 **Agent model choices are less fussy.** Saved agent models and newly detected models are combined, so custom setups are less likely to disappear from the picker.
+- 💬 **OpenAI-style chat requests return a full answer unless streaming is requested.** This better matches clients that expect a single response by default.
+
+### Fixed
+
+- 🔐 **Trusted-header sign-in is more dependable.** Computer now recognizes the configured header during session checks and keeps signed-in users attached to their account.
+- 🧹 **Deleted agent profiles stay deleted after saving.** Removing a saved agent no longer gets skipped just because no new profiles were added.
+- 🏠 **Workspace names are preserved when workspace details update.** Updating tabs or layout no longer quietly falls back to the folder name.
+- 📝 **Lists appear correctly while writing.** Bulleted and numbered lists now show their markers in chat and rich text editors.
+- 🗂️ **Git paths are easier to read.** File names with non-English characters now appear as themselves instead of escaped text.
+- 🧩 **Quoted tool-server commands work more reliably.** Local tool servers can start even when the saved command was wrapped in quotes.
+- 📦 **Optional tool-server support stays on the supported version range.** Fresh installs avoid incompatible future releases.
+
 ## [0.9.15] - 2026-07-23
 
 ### Fixed
