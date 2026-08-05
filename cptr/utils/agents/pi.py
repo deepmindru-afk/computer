@@ -20,6 +20,7 @@ from cptr.utils.agents.events import (
     AgentToolOutputDelta,
     AgentToolUpdate,
 )
+from cptr.utils.identity import env_for, preexec_for
 
 
 def _content_text(value: Any) -> str:
@@ -118,11 +119,14 @@ def tool_output_delta(event: dict[str, Any], sent: dict[str, str]) -> AgentToolO
 class PiRpcClient:
     """Small stdio client for ``pi --mode rpc``."""
 
-    def __init__(self, command: str, cwd: str, env: dict[str, str], model: str = "") -> None:
+    def __init__(
+        self, command: str, cwd: str, env: dict[str, str], model: str = "", preexec_fn=None
+    ) -> None:
         self.command = command
         self.cwd = cwd
         self.env = env
         self.model = model
+        self.preexec_fn = preexec_fn
         self.proc: asyncio.subprocess.Process | None = None
         self.reader_task: asyncio.Task[None] | None = None
         self.stderr_task: asyncio.Task[None] | None = None
@@ -143,6 +147,7 @@ class PiRpcClient:
             stderr=asyncio.subprocess.PIPE,
             cwd=self.cwd or os.getcwd(),
             env=self.env,
+            preexec_fn=self.preexec_fn,
         )
         self.reader_task = asyncio.create_task(self._read_stdout())
         self.stderr_task = asyncio.create_task(self._read_stderr())
@@ -223,8 +228,21 @@ class PiRpcClient:
 
     async def _read_stderr(self) -> None:
         assert self.proc and self.proc.stderr
-        while line := await self.proc.stderr.readline():
-            self.stderr_tail.append(line.decode(errors="replace").rstrip())
+        while True:
+            try:
+                line = await self.proc.stderr.readline()
+            except ValueError as exc:
+                self._append_stderr(f"stderr line too long: {exc}", truncated=True)
+                continue
+            if not line:
+                break
+            self._append_stderr(line.decode(errors="replace"))
+
+    def _append_stderr(self, text: str, *, truncated: bool = False) -> None:
+        text = text.strip()
+        if text:
+            suffix = " [truncated]" if truncated else ""
+            self.stderr_tail.append(f"{text[:2000]}{suffix}")
 
     def _fail_pending(self, message: str) -> None:
         for future in self.pending.values():
@@ -248,11 +266,18 @@ async def run_pi_agent(
     chat_params: dict[str, Any],
     resume_state: dict[str, Any] | None,
     attachments: PreparedAgentAttachments,
+    identity=None,
 ) -> AsyncIterator[AgentEvent]:
-    env = os.environ.copy()
+    env = env_for(identity, workspace) if identity and identity.is_pam else os.environ.copy()
     if profile.get("home"):
         env["HOME"] = os.path.expanduser(str(profile["home"]))
-    client = PiRpcClient(str(profile.get("command") or "pi"), workspace, env, model)
+    client = PiRpcClient(
+        str(profile.get("command") or "pi"),
+        workspace,
+        env,
+        model,
+        preexec_for(identity) if identity and identity.is_pam else None,
+    )
     session_file = (resume_state or {}).get("session_file")
     resumed = isinstance(session_file, str) and bool(session_file)
 

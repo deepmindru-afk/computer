@@ -72,6 +72,7 @@ from cptr.utils.agents.events import (
 )
 from cptr.utils.agents.attachments import prepare_agent_attachments
 from cptr.utils.model_targets import AgentModelTarget, ApiModelTarget, ModelTarget
+from cptr.utils.identity import identity_for_context
 
 logger = logging.getLogger(__name__)
 
@@ -364,6 +365,8 @@ def get_pending_input_lock(chat_id: str) -> asyncio.Lock:
 
 
 def start_task(
+    request,
+    *,
     message_id: str,
     chat_id: str,
     user_id: str,
@@ -386,13 +389,14 @@ def start_task(
         )
     task = asyncio.create_task(
         run_chat_task(
-            message_id,
-            chat_id,
-            user_id,
-            target,
-            workspace,
-            regeneration_prompt,
-            output_queue,
+            request,
+            message_id=message_id,
+            chat_id=chat_id,
+            user_id=user_id,
+            target=target,
+            workspace=workspace,
+            regeneration_prompt=regeneration_prompt,
+            output_queue=output_queue,
         )
     )
     _tasks[message_id] = task
@@ -558,7 +562,7 @@ def _first_ready_pending_input_batch(messages: list[ChatMessage]) -> list[ChatMe
     return batch
 
 
-async def process_pending_chat_inputs(chat_id: str, user_id: str, workspace: str):
+async def process_pending_chat_inputs(request, chat_id: str, user_id: str, workspace: str):
     """Start the next task from user-queued prompts or internal subagent results.
 
     Uses a per-chat lock to prevent concurrent processing from
@@ -641,6 +645,7 @@ async def process_pending_chat_inputs(chat_id: str, user_id: str, workspace: str
 
             # Start new task and continue draining other ready branch batches.
             start_task(
+                request,
                 message_id=assistant_msg.id,
                 chat_id=chat_id,
                 user_id=user_id,
@@ -691,7 +696,10 @@ async def reconcile_chat_state():
         if chat:
             workspace = (chat.meta or {}).get("workspace", "")
             try:
-                await process_pending_chat_inputs(cid, chat.user_id, workspace)
+                from cptr.utils.identity import internal_request_for_user
+
+                request = await internal_request_for_user(None, chat.user_id)
+                await process_pending_chat_inputs(request, cid, chat.user_id, workspace)
             except Exception:
                 logger.exception("[reconcile] Failed to process pending inputs for chat %s", cid)
 
@@ -765,6 +773,7 @@ async def review_tool_approval(
         args_text[:1000],
     )
     parsed = await generate_json(
+        None,
         model_id=configured_model,
         active_connection=connection,
         active_model=model,
@@ -820,6 +829,7 @@ async def generate_chat_title(
 
     try:
         parsed = await generate_json(
+            None,
             model_id=await Config.get("chat.title_generation.model"),
             active_connection=connection,
             active_model=model,
@@ -1382,6 +1392,8 @@ def _default_base_url(provider: str) -> str:
 
 
 async def run_chat_task(
+    request,
+    *,
     message_id: str,
     chat_id: str,
     user_id: str,
@@ -1545,6 +1557,7 @@ async def run_chat_task(
         from cptr.utils.agents.pi import run_pi_agent
 
         chat_obj = await Chat.get_by_id(chat_id)
+        identity = await identity_for_context({"request": request, "user_id": user_id})
         chat_params = (chat_obj.meta or {}).get("params", {}) if chat_obj else {}
         agent_workspace = workspace or str(Path.home())
         messages, loaded_summary = await _load_message_history(chat_id, message_id)
@@ -1559,6 +1572,7 @@ async def run_chat_task(
         )
         memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
         system = await _load_system_prompt(
+            request,
             agent_workspace,
             agent_target.full_model_id,
             user_id=user_id,
@@ -1575,7 +1589,9 @@ async def run_chat_task(
             if isinstance(meta_files, list):
                 current_user_files = meta_files
         agent_attachments = await prepare_agent_attachments(
+            request,
             workspace=agent_workspace,
+            user_id=user_id,
             chat_id=chat_id,
             message_id=(msg.parent_id if msg and msg.parent_id else message_id),
             files=current_user_files,
@@ -1637,6 +1653,7 @@ async def run_chat_task(
             chat_params=chat_params,
             resume_state=resume_state,
             attachments=agent_attachments,
+            identity=identity,
         ):
             if isinstance(event, AgentTextDelta):
                 await _finish_reasoning_item()
@@ -1873,6 +1890,7 @@ async def run_chat_task(
         )
         memory_message, memory_files = _memory_recall_inputs(messages, regeneration_prompt)
         system = await _load_system_prompt(
+            request,
             workspace,
             model,
             user_id=user_id,
@@ -2085,6 +2103,7 @@ async def run_chat_task(
         tool_ctx = {
             "workspace": workspace,
             "user_id": user_id,
+            "request": request,
             "model_id": model,
             "full_model_id": ((chat_obj.meta or {}).get("last_model") if chat_obj else None)
             or model,
@@ -2153,6 +2172,7 @@ async def run_chat_task(
                 # Append summary to system prompt (works for all providers)
                 memory_message, memory_files = _memory_recall_inputs(keep_zone, regeneration_prompt)
                 system = await _load_system_prompt(
+                    request,
                     workspace,
                     model,
                     user_id=user_id,
@@ -2807,7 +2827,7 @@ async def run_chat_task(
             except Exception:
                 logger.debug("[task %s] active-state emit failed", message_id[:8], exc_info=True)
         try:
-            await export_chat_to_file(chat_id)
+            await export_chat_to_file(request, chat_id)
         except Exception:
             logger.exception(f"Failed to export chat {chat_id}")
         # Generate a proper title if the chat still has the auto-truncated fallback
@@ -2845,6 +2865,7 @@ async def run_chat_task(
             from cptr.utils.memory import review_memory_after_turn
 
             await review_memory_after_turn(
+                request,
                 user_id=user_id,
                 message_id=message_id,
                 workspace=workspace,
@@ -2877,6 +2898,6 @@ async def run_chat_task(
             logger.debug("[skills] Failed to review conversation", exc_info=True)
         # Process any pending user prompts or internal subagent results.
         try:
-            await process_pending_chat_inputs(chat_id, user_id, workspace)
+            await process_pending_chat_inputs(request, chat_id, user_id, workspace)
         except Exception:
             logger.exception(f"Failed to process pending inputs for chat {chat_id}")

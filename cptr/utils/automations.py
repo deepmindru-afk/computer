@@ -15,6 +15,7 @@ import logging
 import random
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from dateutil.rrule import rrulestr
@@ -99,7 +100,7 @@ async def scheduler_worker_loop(app) -> None:
             if batch:
                 logger.info("Claimed %d due automation(s)", len(batch))
             for automation in batch:
-                asyncio.create_task(execute_automation(automation))
+                asyncio.create_task(execute_automation(app, automation))
         except Exception:
             logger.exception("Scheduler worker error")
 
@@ -111,7 +112,7 @@ async def scheduler_worker_loop(app) -> None:
 ####################
 
 
-async def execute_automation(automation, webhook_payload: str | None = None) -> None:
+async def execute_automation(app, automation, webhook_payload: str | None = None) -> None:
     """Execute an automation by creating a chat and calling start_task().
 
     Creates a real chat + messages, then uses the same agentic loop
@@ -123,10 +124,12 @@ async def execute_automation(automation, webhook_payload: str | None = None) -> 
     from cptr.models import Chat, ChatMessage
     from cptr.models.automations import AutomationRun
     from cptr.utils.config import now_ms
+    from cptr.utils.identity import internal_request_for_user
     from cptr.socket.main import emit_to_user
 
     try:
         workspace = automation.workspace
+        request = await internal_request_for_user(app, automation.user_id)
         model_id = automation.model_id
         prompt = automation.prompt
 
@@ -166,12 +169,11 @@ async def execute_automation(automation, webhook_payload: str | None = None) -> 
 
         await Chat.update_current_message(chat.id, assistant_msg.id, now_ms())
 
-        # Write .cptr/chats/{id}.json marker so list_chats discovers it
-        from pathlib import Path
+        marker = Path(workspace) / ".cptr" / "chats" / f"{chat.id}.json"
 
-        chats_dir = Path(workspace) / ".cptr" / "chats"
-        chats_dir.mkdir(parents=True, exist_ok=True)
-        (chats_dir / f"{chat.id}.json").write_text("{}")
+        from cptr.utils.runtime import Runtime
+
+        await Runtime.write_file(request, str(marker), "{}")
 
         from cptr.utils.model_targets import resolve_model_target
 
@@ -181,6 +183,7 @@ async def execute_automation(automation, webhook_payload: str | None = None) -> 
         from cptr.utils.chat_task import start_task
 
         start_task(
+            request,
             message_id=assistant_msg.id,
             chat_id=chat.id,
             user_id=automation.user_id,

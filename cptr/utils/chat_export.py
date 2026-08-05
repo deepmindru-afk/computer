@@ -6,13 +6,14 @@ This function rebuilds the file from DB state.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from pathlib import Path
 
+from fastapi import Request
 from cptr.env import DATA_DIR
 from cptr.models import Chat, ChatMessage
+from cptr.utils.runtime import Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ def chat_directory(workspace: str | None) -> Path:
     return Path(workspace) / ".cptr" / "chats" if workspace else DATA_DIR / "chats"
 
 
-async def export_chat_to_file(chat_id: str) -> None:
+async def export_chat_to_file(request: Request, chat_id: str) -> None:
     """Regenerate .cptr/chats/{id}.json from the DB."""
     chat = await Chat.get_by_id(chat_id)
     if not chat:
@@ -73,13 +74,13 @@ async def export_chat_to_file(chat_id: str) -> None:
         },
     }
 
-    def _write():
-        chats_dir = chat_directory(workspace)
-        chats_dir.mkdir(parents=True, exist_ok=True)
-        target = chats_dir / f"{chat_id}.json"
-        target.write_text(json.dumps(chat_data, indent=2, ensure_ascii=False))
-
     try:
-        await asyncio.to_thread(_write)
+        content = json.dumps(chat_data, indent=2, ensure_ascii=False)
+        target = chat_directory(workspace) / f"{chat_id}.json"
+        if workspace:
+            await Runtime.write_file(request, str(target), content)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
     except Exception:
         logger.exception(f"Failed to export chat {chat_id}")

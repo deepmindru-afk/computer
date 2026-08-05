@@ -60,10 +60,11 @@ def _raise_image_error(exc: Exception) -> None:
 
 
 @router.post("/generations")
-async def create_image_generation(body: GenerateImageRequest, request: Request):
+async def create_image_generation(request: Request, body: GenerateImageRequest):
     user_id = _get_user(request)
     try:
         images = await generate_images(
+            request,
             body.prompt,
             user_id=user_id,
             model=body.model,
@@ -77,10 +78,11 @@ async def create_image_generation(body: GenerateImageRequest, request: Request):
 
 
 @router.post("/edits")
-async def create_image_edit(body: EditImageRequest, request: Request):
+async def create_image_edit(request: Request, body: EditImageRequest):
     user_id = _get_user(request)
     try:
         images = await edit_images(
+            request,
             body.prompt,
             body.image_ids,
             user_id=user_id,

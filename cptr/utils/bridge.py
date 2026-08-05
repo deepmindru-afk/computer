@@ -16,6 +16,7 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -91,13 +92,17 @@ class BaseAdapter(ABC):
         """Show a typing indicator in the chat."""
         ...
 
-    async def send_photo(self, chat_id: str, data: bytes, filename: str, caption: str = "") -> str | None:
+    async def send_photo(
+        self, chat_id: str, data: bytes, filename: str, caption: str = ""
+    ) -> str | None:
         """Send a photo. Default: falls back to send() with caption only."""
         if caption:
             return await self.send(chat_id, caption)
         return None
 
-    async def send_document(self, chat_id: str, data: bytes, filename: str, caption: str = "") -> str | None:
+    async def send_document(
+        self, chat_id: str, data: bytes, filename: str, caption: str = ""
+    ) -> str | None:
         """Send a file. Default: falls back to send() with caption only."""
         if caption:
             return await self.send(chat_id, caption)
@@ -123,20 +128,20 @@ def chunk_message(text: str, max_len: int = 4096) -> list[str]:
         cut = remaining.rfind("\n\n", 0, max_len)
         if cut > max_len // 4:
             chunks.append(remaining[:cut])
-            remaining = remaining[cut + 2:]
+            remaining = remaining[cut + 2 :]
             continue
 
         cut = remaining.rfind("\n", 0, max_len)
         if cut > max_len // 4:
             chunks.append(remaining[:cut])
-            remaining = remaining[cut + 1:]
+            remaining = remaining[cut + 1 :]
             continue
 
         for sep in (". ", "! ", "? "):
             cut = remaining.rfind(sep, 0, max_len)
             if cut > max_len // 4:
                 chunks.append(remaining[: cut + 1])
-                remaining = remaining[cut + 2:]
+                remaining = remaining[cut + 2 :]
                 break
         else:
             chunks.append(remaining[:max_len])
@@ -214,9 +219,7 @@ async def find_chat_for_thread(bot_id: str, external_thread_id: str) -> str | No
     best_ts = -1
 
     async with await get_db() as db:
-        result = await db.execute(
-            select(Chat).where(Chat.user_id.isnot(None))
-        )
+        result = await db.execute(select(Chat).where(Chat.user_id.isnot(None)))
         for chat in result.scalars():
             meta = chat.meta or {}
             if (
@@ -241,8 +244,9 @@ class BotManager:
     asyncio tasks.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, app=None) -> None:
         global _current_bot_manager
+        self.app = app
         self._adapters: dict[str, BaseAdapter] = {}  # bot_id → adapter
         self._tasks: dict[str, asyncio.Task] = {}  # bot_id → polling task
         self._stream_tasks: dict[str, asyncio.Task] = {}  # key → streaming task
@@ -344,22 +348,27 @@ class BotManager:
 
         if bot["platform"] == "telegram":
             from cptr.utils.adapters.telegram import TelegramAdapter
+
             return TelegramAdapter(token=token)
 
         if bot["platform"] == "discord":
             from cptr.utils.adapters.discord import DiscordAdapter
+
             return DiscordAdapter(token=token)
 
         if bot["platform"] == "slack":
             from cptr.utils.adapters.slack import SlackAdapter
+
             return SlackAdapter(token=token)
 
         if bot["platform"] == "whatsapp":
             from cptr.utils.adapters.whatsapp import WhatsAppAdapter
+
             return WhatsAppAdapter(token=token, bot_id=bot["id"])
 
         if bot["platform"] == "signal":
             from cptr.utils.adapters.signal import SignalAdapter
+
             return SignalAdapter(token=token)
 
         return None
@@ -371,7 +380,9 @@ class BotManager:
         # 1. Auth check
         allowed = bot.get("allowed_senders") or []
         if allowed and event.sender_id not in allowed:
-            logger.debug("Ignoring unauthorized sender %s on bot %s", event.sender_id, bot["id"][:8])
+            logger.debug(
+                "Ignoring unauthorized sender %s on bot %s", event.sender_id, bot["id"][:8]
+            )
             return
 
         adapter = self._adapters.get(bot["id"])
@@ -380,6 +391,7 @@ class BotManager:
         # Normalize: strip Discord bot mention prefix (<@123456>)
         # and Telegram command suffix (/cmd@BotName → /cmd)
         import re
+
         clean = re.sub(r"<@!?\d+>\s*", "", text).strip()
         cmd = clean.split("@")[0].lower() if clean.startswith("/") else ""
 
@@ -398,6 +410,7 @@ class BotManager:
             cancelled = False
             if chat_id:
                 from cptr.utils.chat_task import _tasks, _task_chat, cancel_task
+
                 for mid, cid in list(_task_chat.items()):
                     if cid == chat_id and mid in _tasks and not _tasks[mid].done():
                         await cancel_task(mid)
@@ -413,20 +426,26 @@ class BotManager:
 
         if cmd == "/retry":
             from cptr.models import ChatMessage
+
             chat_id = await find_chat_for_thread(bot["id"], event.chat_id)
             if not chat_id:
                 if adapter:
                     try:
-                        await adapter.send(event.chat_id, "No active conversation. Send a message first.")
+                        await adapter.send(
+                            event.chat_id, "No active conversation. Send a message first."
+                        )
                     except Exception:
                         pass
                 return
             # Check if a task is already running
             from cptr.utils.chat_task import get_active_chat_ids
+
             if chat_id in get_active_chat_ids():
                 if adapter:
                     try:
-                        await adapter.send(event.chat_id, "⏳ A task is already running. Use /stop first.")
+                        await adapter.send(
+                            event.chat_id, "⏳ A task is already running. Use /stop first."
+                        )
                     except Exception:
                         pass
                 return
@@ -461,6 +480,7 @@ class BotManager:
                 return
             # Update bot config
             from cptr.models import Config
+
             bots_raw = await Config.get("bots") or []
             for b in bots_raw:
                 if b.get("id") == bot["id"]:
@@ -494,6 +514,7 @@ class BotManager:
 
         if cmd == "/workspaces":
             from cptr.models import Workspace
+
             workspaces = await Workspace.get_by_user(bot["user_id"])
             if not workspaces:
                 if adapter:
@@ -521,6 +542,7 @@ class BotManager:
                 return
 
             from cptr.models import Workspace
+
             workspaces = await Workspace.get_by_user(bot["user_id"])
             match = None
             ws_lower = ws_name.lower()
@@ -537,11 +559,14 @@ class BotManager:
 
             if not match:
                 if adapter:
-                    await adapter.send(event.chat_id, f"Workspace '{ws_name}' not found. Use /workspaces to list.")
+                    await adapter.send(
+                        event.chat_id, f"Workspace '{ws_name}' not found. Use /workspaces to list."
+                    )
                 return
 
             # Update bot config with new workspace
             from cptr.models import Config
+
             bots_raw = await Config.get("bots") or []
             for b in bots_raw:
                 if b.get("id") == bot["id"]:
@@ -554,7 +579,9 @@ class BotManager:
             await self._create_chat(event, bot)
             if adapter:
                 try:
-                    await adapter.send(event.chat_id, f"✨ Switched to {match.name}\nNew conversation started.")
+                    await adapter.send(
+                        event.chat_id, f"✨ Switched to {match.name}\nNew conversation started."
+                    )
                 except Exception:
                     pass
             return
@@ -592,10 +619,12 @@ class BotManager:
             created_at=now_ms(),
         )
 
-        from pathlib import Path
-        chats_dir = Path(bot["workspace"]) / ".cptr" / "chats"
-        chats_dir.mkdir(parents=True, exist_ok=True)
-        (chats_dir / f"{chat.id}.json").write_text("{}")
+        marker = Path(bot["workspace"]) / ".cptr" / "chats" / f"{chat.id}.json"
+        from cptr.utils.identity import internal_request_for_user
+        from cptr.utils.runtime import Runtime
+
+        request = await internal_request_for_user(self.app, bot["user_id"])
+        await Runtime.write_file(request, str(marker), "{}")
 
         return chat.id
 
@@ -643,7 +672,9 @@ class BotManager:
                 entry["type"] = "file"
 
             file_entries.append(entry)
-            logger.info("[bridge] Saved attachment %s (%s, %d bytes)", att.filename, att.type, len(att.data))
+            logger.info(
+                "[bridge] Saved attachment %s (%s, %d bytes)", att.filename, att.type, len(att.data)
+            )
 
         return file_entries, "\n".join(text_parts)
 
@@ -702,7 +733,11 @@ class BotManager:
             return ""
 
     async def _dispatch_task(
-        self, chat_id: str, event: MessageEvent, bot: dict, adapter: BaseAdapter | None,
+        self,
+        chat_id: str,
+        event: MessageEvent,
+        bot: dict,
+        adapter: BaseAdapter | None,
     ) -> None:
         from cptr.models import Chat, ChatMessage
         from cptr.utils.chat_task import start_task, _task_chat
@@ -712,7 +747,9 @@ class BotManager:
         user_meta: dict | None = None
         if event.attachments:
             file_entries, text_prepend = await self._process_attachments(
-                event.attachments, adapter, event.chat_id,
+                event.attachments,
+                adapter,
+                event.chat_id,
             )
             if file_entries:
                 user_meta = {"files": file_entries}
@@ -727,17 +764,24 @@ class BotManager:
         active_chat_ids = set(_task_chat.values())
         if chat_id in active_chat_ids:
             await ChatMessage.create(
-                chat_id=chat_id, role="user", content=event.text,
+                chat_id=chat_id,
+                role="user",
+                content=event.text,
                 parent_id=parent_id,
-                meta={"queued": True, **(user_meta or {})}, created_at=now_ms(),
+                meta={"queued": True, **(user_meta or {})},
+                created_at=now_ms(),
             )
             logger.info("[bridge] Queued message for busy chat %s", chat_id[:8])
             return
 
         # Create user message — parent_id chains to previous assistant reply
         user_msg = await ChatMessage.create(
-            chat_id=chat_id, role="user", content=event.text,
-            parent_id=parent_id, meta=user_meta, created_at=now_ms(),
+            chat_id=chat_id,
+            role="user",
+            content=event.text,
+            parent_id=parent_id,
+            meta=user_meta,
+            created_at=now_ms(),
         )
 
         # Resolve model target
@@ -753,14 +797,21 @@ class BotManager:
 
         # Create assistant placeholder
         assistant_msg = await ChatMessage.create(
-            chat_id=chat_id, role="assistant", content="", parent_id=user_msg.id,
-            model=bot["model_id"], done=False, created_at=now_ms(),
+            chat_id=chat_id,
+            role="assistant",
+            content="",
+            parent_id=user_msg.id,
+            model=bot["model_id"],
+            done=False,
+            created_at=now_ms(),
         )
         await Chat.update_current_message(chat_id, assistant_msg.id, now_ms())
 
-        # Export JSON so the web UI can see the chat immediately
         from cptr.utils.chat_export import export_chat_to_file
-        await export_chat_to_file(chat_id)
+        from cptr.utils.identity import internal_request_for_user
+
+        request = await internal_request_for_user(self.app, bot["user_id"])
+        await export_chat_to_file(request, chat_id)
 
         # Send initial "thinking" message for non-draft platforms (Discord)
         # Telegram uses sendMessageDraft which handles this natively
@@ -775,13 +826,17 @@ class BotManager:
         stream_key = f"{bot['id']}:{event.chat_id}"
         self._stream_tasks[stream_key] = asyncio.create_task(
             self._stream_loop(
-                adapter, event.chat_id, platform_msg_id,
-                assistant_msg.id, bot,
+                adapter,
+                event.chat_id,
+                platform_msg_id,
+                assistant_msg.id,
+                bot,
             )
         )
 
         # Start the agentic loop
         start_task(
+            request,
             message_id=assistant_msg.id,
             chat_id=chat_id,
             user_id=bot["user_id"],
@@ -820,6 +875,7 @@ class BotManager:
         if use_draft:
             try:
                 from cptr.utils.adapters.telegram import TelegramAdapter
+
                 if isinstance(adapter, TelegramAdapter):
                     # Start with empty draft → shows "Thinking..." placeholder
                     draft_id = await adapter.send_draft(platform_chat_id, "", None)
@@ -861,9 +917,7 @@ class BotManager:
 
                     if use_draft:
                         try:
-                            draft_id = await adapter.send_draft(
-                                platform_chat_id, display, draft_id
-                            )
+                            draft_id = await adapter.send_draft(platform_chat_id, display, draft_id)
                             last_sent = display
                         except Exception:
                             use_draft = False
@@ -890,6 +944,7 @@ class BotManager:
             # ── Task complete — send final response ──
 
             from cptr.models import ChatMessage
+
             msg = await ChatMessage.get_by_id(task_message_id)
             final_content = (msg.content if msg else content).strip()
 
@@ -897,7 +952,9 @@ class BotManager:
                 if use_draft:
                     await adapter.send(platform_chat_id, "✅ Done (no text output)")
                 elif platform_msg_id:
-                    await adapter.edit(platform_chat_id, platform_msg_id, "✅ Done (no text output)")
+                    await adapter.edit(
+                        platform_chat_id, platform_msg_id, "✅ Done (no text output)"
+                    )
                 return
 
             final_display = final_content

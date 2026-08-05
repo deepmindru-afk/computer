@@ -24,9 +24,11 @@ from cptr.utils.agents.events import (
     AgentToolUpdate,
 )
 from cptr.utils.agents.prompts import turn_prompt_text
+from cptr.utils.identity import env_for, preexec_for
 
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_OPENCODE_ACTIVITY = object()
 
 
 def _free_port() -> int:
@@ -70,13 +72,17 @@ async def _server_url_from_stdout(proc: asyncio.subprocess.Process, port: int) -
 
 
 @asynccontextmanager
-async def _opencode_server(profile: dict[str, Any], workspace: str):
+async def _opencode_server(profile: dict[str, Any], workspace: str, identity=None):
     server_url = str(profile.get("server_url") or "").strip()
     if server_url:
         yield server_url, None
         return
 
-    env = os.environ.copy()
+    env = (
+        env_for(identity, workspace or os.getcwd())
+        if identity and identity.is_pam
+        else os.environ.copy()
+    )
     if profile.get("home"):
         env["HOME"] = os.path.expanduser(str(profile["home"]))
     port = _free_port()
@@ -89,6 +95,7 @@ async def _opencode_server(profile: dict[str, Any], workspace: str):
         stderr=asyncio.subprocess.PIPE,
         cwd=workspace or os.getcwd(),
         env={**env, "OPENCODE_CONFIG_CONTENT": "{}"},
+        preexec_fn=preexec_for(identity) if identity and identity.is_pam else None,
     )
     stderr_task = asyncio.create_task(_drain_stderr(proc))
     try:
@@ -108,8 +115,12 @@ async def _opencode_server(profile: dict[str, Any], workspace: str):
 
 async def _drain_stderr(proc: asyncio.subprocess.Process) -> None:
     assert proc.stderr is not None
-    while await proc.stderr.readline():
-        pass
+    while True:
+        try:
+            if not await proc.stderr.readline():
+                break
+        except ValueError:
+            continue
 
 
 def _headers(profile: dict[str, Any]) -> dict[str, str]:
@@ -325,10 +336,11 @@ async def run_opencode_agent(
     chat_params: dict[str, Any],
     resume_state: dict[str, Any] | None,
     attachments: PreparedAgentAttachments,
+    identity=None,
 ) -> AsyncIterator[AgentEvent]:
     del chat_params
     try:
-        async with _opencode_server(profile, workspace) as (server_url, _proc):
+        async with _opencode_server(profile, workspace, identity) as (server_url, _proc):
             headers = _headers(profile)
             urls = opencode_server_url_candidates(server_url)
             last_connect_error: Exception | None = None
@@ -346,7 +358,7 @@ async def run_opencode_agent(
                         parsed_model = _parse_model(model)
                         while True:
                             emitted: dict[str, str] = {}
-                            event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+                            event_queue: asyncio.Queue[AgentEvent | object | None] = asyncio.Queue()
                             event_task = asyncio.create_task(
                                 _collect_opencode_events(
                                     client, headers, session_id, emitted, event_queue
@@ -370,10 +382,38 @@ async def run_opencode_agent(
                                     resumed = False
                                     continue
 
+                                last_activity = asyncio.get_running_loop().time()
                                 while True:
-                                    item = await event_queue.get()
+                                    try:
+                                        item = await asyncio.wait_for(event_queue.get(), timeout=1)
+                                    except asyncio.TimeoutError:
+                                        with suppress(Exception):
+                                            payload = await asyncio.wait_for(
+                                                _request(
+                                                    client,
+                                                    "GET",
+                                                    ["session/status", "session.status"],
+                                                    headers=headers,
+                                                ),
+                                                timeout=5,
+                                            )
+                                            status = _session_data(payload).get(session_id)
+                                            if (
+                                                not isinstance(status, dict)
+                                                or status.get("type") == "idle"
+                                            ):
+                                                break
+                                        if asyncio.get_running_loop().time() - last_activity >= 600:
+                                            raise RuntimeError(
+                                                "OpenCode stopped sending events for 10 minutes."
+                                            )
+                                        continue
+                                    if item is _OPENCODE_ACTIVITY:
+                                        last_activity = asyncio.get_running_loop().time()
+                                        continue
                                     if item is None:
                                         break
+                                    last_activity = asyncio.get_running_loop().time()
                                     yield item
                             except asyncio.CancelledError:
                                 with suppress(Exception):
@@ -433,7 +473,7 @@ async def _collect_opencode_events(
     headers: dict[str, str],
     session_id: str,
     emitted: dict[str, str],
-    queue: asyncio.Queue[AgentEvent | None],
+    queue: asyncio.Queue[AgentEvent | object | None],
 ) -> None:
     message_roles: dict[str, str] = {}
     try:
@@ -457,6 +497,7 @@ async def _collect_opencode_events(
                             )
                             if props.get("sessionID") != session_id:
                                 continue
+                            await queue.put(_OPENCODE_ACTIVITY)
                             role_update = _role_update_from_event(event)
                             if role_update:
                                 message_roles[role_update[0]] = role_update[1]
