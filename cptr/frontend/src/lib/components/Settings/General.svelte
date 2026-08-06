@@ -24,7 +24,7 @@
 	const shareLinks = [
 		{
 			label: 'Portalos',
-			href: `https://portalos.ru`
+			href: `https://www.portalos.ru`
 		}
 	];
 
