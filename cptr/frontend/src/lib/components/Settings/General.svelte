@@ -18,14 +18,10 @@
 
 	let { showPwaSettings = false }: Props = $props();
 
-	const REPO_URL = 'https://github.com/deepmindru-afk/computer';
+	const REPO_URL = 'https://www.portalos.ru';
 	const SHARE_TEXT = 'Check out Computer. Your computer, from anywhere.';
 
 	const shareLinks = [
-		{
-			label: 'Portalos',
-			href: `https://portalos.ru`
-		},
 		{
 			label: 'Portalos',
 			href: `https://portalos.ru`
