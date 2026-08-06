@@ -531,7 +531,7 @@
 	"modelSelector.noMatches": "一致なし",
 	"modelSelector.search": "検索...",
 	"about.licenseName": "オープンユースライセンス",
-	"about.copyright": "Copyright © 2026 Open WebUI Inc. All rights reserved.",
+	"about.copyright": "Copyright © 2026 OUI. All rights reserved.",
 	"about.updateAvailable": "v{{version}} が利用可能",
 	"about.share": "共有",
 	"about.copyLink": "リンクをコピー",

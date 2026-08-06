@@ -531,7 +531,7 @@
 	"modelSelector.noMatches": "결과 없음",
 	"modelSelector.search": "검색...",
 	"about.licenseName": "오픈 사용 라이선스",
-	"about.copyright": "Copyright © 2026 Open WebUI Inc. All rights reserved.",
+	"about.copyright": "Copyright © 2026 OUI. All rights reserved.",
 	"about.updateAvailable": "v{{version}} 사용 가능",
 	"about.share": "공유",
 	"about.copyLink": "링크 복사",
