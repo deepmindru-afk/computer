@@ -505,7 +505,6 @@ _UTILITY_PATTERNS = [
     "tags_generation",
 ]
 
-
 async def _intercept_task(
     request: Request,
     body: ChatCompletionRequest,
@@ -694,6 +693,13 @@ async def _resolve_utility_model(request: Request, workspace: str, app_state=Non
     )
 
     candidates: list[str] = []
+    task_header = request.headers.get(OWUI_TASK_HEADER, "").strip()
+    if task_header:
+        from cptr.utils.utility_models import configured_utility_model
+
+        if preferred_model := await configured_utility_model(task_header):
+            candidates.append(preferred_model)
+
     gateway_model = await Config.get("gateway.model")
     if isinstance(gateway_model, str) and gateway_model.strip():
         candidates.append(gateway_model.strip())
@@ -710,7 +716,7 @@ async def _resolve_utility_model(request: Request, workspace: str, app_state=Non
     if isinstance(default_model, str) and default_model.strip():
         candidates.append(default_model.strip())
 
-    for model_id in candidates:
+    for model_id in dict.fromkeys(candidates):
         try:
             target = await resolve_model_target(model_id, app_state)
             if isinstance(target, ApiModelTarget):
@@ -747,6 +753,18 @@ async def _ensure_chat(
                     meta.get("client_chat_id") == client_chat_id
                     or meta.get("owui_chat_id") == client_chat_id
                 ):
+                    normalized = dict(meta)
+                    normalized["workspace"] = workspace
+                    params = (
+                        normalized.get("params")
+                        if isinstance(normalized.get("params"), dict)
+                        else {}
+                    )
+                    normalized["params"] = {**params, "tool_approval_mode": "full"}
+                    normalized["client_chat_id"] = client_chat_id
+                    normalized["owui_chat_id"] = client_chat_id
+                    if normalized != meta:
+                        await Chat.update_meta(chat.id, normalized, now_ms())
                     return chat.id
 
     # Create a new chat
