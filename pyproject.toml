@@ -6,40 +6,40 @@ license = {file = "LICENSE"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "click>=8.1",
-    "fastapi[standard]>=0.128.8",
+    "click>=8.4.2",
+    "fastapi[standard]>=0.141.1",
     "httpx>=0.28.1",
     "watchdog>=6.0.0",
-    "bcrypt>=4.0",
-    "sqlalchemy[asyncio]>=2.0",
-    "aiosqlite>=0.20",
-    "alembic>=1.13",
-    "PyJWT>=2.8",
-    "cryptography>=42.0,<49.0.0",
+    "bcrypt>=5.0.0",
+    "sqlalchemy[asyncio]>=2.0.52",
+    "aiosqlite>=0.22.1",
+    "alembic>=1.19.1",
+    "PyJWT>=2.13.0",
+    "cryptography>=48.0.1,<49.0.0",
     "loguru>=0.7.3",
-    "python-socketio[asgi]>=5.11",
-    "python-dateutil>=2.8",
-    "truststore>=0.10",
-    "pywinpty>=2.0; sys_platform == 'win32'",
+    "python-socketio[asgi]>=5.16.4",
+    "python-dateutil>=2.9.0",
+    "truststore>=0.10.4",
+    "pywinpty>=3.0.5; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
-pam = ["python-pam>=2.0"]
-mcp = ["mcp>=1.8,<2"]
-docs = ["pypdf>=4.0", "python-docx>=1.0", "openpyxl>=3.1"]
-agents = ["claude-agent-sdk>=0.1.62"]
+pam = ["python-pam>=2.0.2"]
+mcp = ["mcp>=1.29.0,<2"]
+docs = ["pypdf>=6.16.1", "python-docx>=1.2.0", "openpyxl>=3.1.5"]
+agents = ["claude-agent-sdk>=0.2.140"]
 all = [
-    "mcp>=1.8,<2",
-    "pypdf>=4.0",
-    "python-docx>=1.0",
-    "openpyxl>=3.1",
-    "python-pam>=2.0",
-    "claude-agent-sdk>=0.1.62",
+    "mcp>=1.29.0,<2",
+    "pypdf>=6.16.1",
+    "python-docx>=1.2.0",
+    "openpyxl>=3.1.5",
+    "python-pam>=2.0.2",
+    "claude-agent-sdk>=0.2.140",
 ]
 
 [dependency-groups]
 dev = [
-    "ruff>=0.14.8",
+    "ruff>=0.16.3",
 ]
 
 [project.scripts]
