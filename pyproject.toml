@@ -25,11 +25,11 @@ dependencies = [
 
 [project.optional-dependencies]
 pam = ["python-pam>=2.0.2"]
-mcp = ["mcp>=1.29.0,<2"]
+mcp = ["mcp>=1.29.0"]
 docs = ["pypdf>=6.16.1", "python-docx>=1.2.0", "openpyxl>=3.1.5"]
 agents = ["claude-agent-sdk>=0.2.140"]
 all = [
-    "mcp>=1.29.0,<2",
+    "mcp>=1.29.0",
     "pypdf>=6.16.1",
     "python-docx>=1.2.0",
     "openpyxl>=3.1.5",
