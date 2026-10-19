@@ -33,6 +33,7 @@ from cptr.utils.identity import (
     preexec_for,
 )
 from cptr.utils.runtime import Runtime, FileError
+from cptr.utils.workspace_watch import start_directory_watch
 
 try:
     import fcntl
@@ -2390,6 +2391,38 @@ async def search_chats(
     )
 
 
+async def get_current_time() -> str:
+    """Get the current date, time, and timezone of this machine.
+
+    Returns a JSON string containing:
+    - iso_date: YYYY-MM-DD
+    - time: HH:MM:SS
+    - weekday: Full name (e.g., Friday)
+    - timezone: Timezone abbreviation (e.g., CEST)
+    - offset: UTC offset (e.g., +0200)
+    - raw_timestamp: ISO 8601 format
+
+    Use for scheduling-relative questions ("what day is it?", "how long until 18:00?") instead of
+    running shell commands.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    now = datetime.now().astimezone()
+    
+    data = {
+        "iso_date": now.strftime('%Y-%m-%d'),
+        "time": now.strftime('%H:%M:%S'),
+        "weekday": now.strftime('%A'),
+        "timezone": now.strftime('%Z'),
+        "offset": now.strftime('%z'),
+        "raw_timestamp": now.isoformat()
+    }
+    
+    return json.dumps(data)
+
+
+
 async def notify(message: str, target: str = "", title: str = "", *, __context__: dict) -> str:
     """Send a notification to a user notification target.
 
@@ -2420,6 +2453,38 @@ def normalize_tool_approval(value: Any) -> ToolApprovalPolicy | None:
     return value if isinstance(value, str) and value in TOOL_APPROVAL_POLICIES else None
 
 
+async def watch_directory(
+    path: str,
+    trigger_on: str | None = None,
+    *,
+    __context__: dict,
+) -> str:
+    """Start monitoring a directory for changes.
+    When a file matching the `trigger_on` regex pattern is created or modified,
+    it will trigger a new agent turn after the current task completes.
+    If no pattern is provided, the agent will be notified of all changes via a system message note.
+
+    :param path: Directory path relative to workspace root.
+    :param trigger_on: A regex pattern. If provided, files matching this will trigger a new turn.
+    """
+    chat_id = __context__.get("chat_id", "")
+    user_id = __context__.get("user_id", "")
+    workspace = __context__.get("workspace", "")
+
+    # Resolve path relative to workspace root if available
+    if workspace:
+        abs_path = str(Path(workspace) / path)
+    else:
+        # No workspace → resolve relative to home dir
+        abs_path = str(Path.home() / path)
+
+    success = await start_directory_watch(abs_path, chat_id, user_id, workspace, trigger_on)
+    if success:
+        return f"Started watching {abs_path} (Trigger on: {trigger_on or 'None'})"
+    else:
+        return f"Failed to start watching {abs_path}"
+
+
 TOOLS: dict[str, dict] = {
     # Auto mode runs these without asking.
     "read_file": {"fn": read_file, "approval": "allow"},
@@ -2429,6 +2494,7 @@ TOOLS: dict[str, dict] = {
     "web_search": {"fn": web_search, "approval": "allow"},
     "read_url": {"fn": read_url, "approval": "allow"},
     "search_chats": {"fn": search_chats, "approval": "allow"},
+    "get_current_time": {"fn": get_current_time, "approval": "allow"},
     "list_automations": {"fn": list_automations, "approval": "allow"},
     "view_skill": {"fn": view_skill, "approval": "allow"},
     "update_tasks": {"fn": update_tasks, "approval": "allow"},
@@ -2449,6 +2515,7 @@ TOOLS: dict[str, dict] = {
     "image_generate": {"fn": image_generate},
     "manage_skill": {"fn": manage_skill},
     "update_memory": {"fn": update_memory, "approval": "allow"},
+    "watch_directory": {"fn": watch_directory, "approval": "allow"},
 }
 
 # Browser tools — conditionally included in schemas based on browser.enabled
@@ -2885,6 +2952,7 @@ BUILTIN_TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "images": ("image_generate",),
     "subagents": ("delegate_task",),
     "notifications": ("notify",),
+    "time": ("get_current_time",),
 }
 
 GLOBAL_CHAT_DISABLED_TOOLS = {
@@ -3296,9 +3364,11 @@ async def execute_tool(name: str, args: dict, __context__: dict) -> str:
             sig = inspect.signature(fn)
             if "__context__" in sig.parameters:
                 return await fn(**args, __context__=__context__)
-            else:
+            elif "workspace" in sig.parameters:
                 # Legacy tools: inject workspace directly
                 return await fn(**args, workspace=__context__["workspace"])
+            else:
+                return await fn(**args)
         except Exception as e:
             return f"Error executing {name}: {e}"
 

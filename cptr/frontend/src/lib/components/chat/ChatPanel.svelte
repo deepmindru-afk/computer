@@ -55,6 +55,8 @@
 		unlockTtsAudioPlayback
 	} from '$lib/stores/audio';
 
+	import { showReasoningTraces } from '$lib/stores/reasoning';
+
 	import ChatInput from './ChatInput.svelte';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
@@ -99,6 +101,7 @@
 	let planMode = $state(false);
 	let requestParams = $state<Record<string, unknown>>({});
 	let voiceModeEnabled = $state(false);
+	let showReasoning = $state(true);
 	let allMessages = $state<ChatMessageRow[]>([]);
 	const pendingAskUser = $derived.by(() => {
 		for (const message of [...allMessages].reverse()) {
@@ -549,6 +552,7 @@
 		output?: any;
 		tasks?: ChatTask[];
 		context_usage?: ContextUsage | null;
+		llama_metrics?: Record<string, number> | null;
 		done?: boolean;
 		error?: string;
 		pending_inputs_processed?: boolean;
@@ -640,6 +644,12 @@
 			allMessages = [...allMessages];
 			handleTtsDelta(data.message_id, data.delta);
 		}
+		if (data.llama_metrics) {
+			// Live stream metrics — keep on meta so the same path is used after
+			// the post-done DB reload (which persists meta.llama_metrics).
+			msg.meta = { ...(msg.meta ?? {}), llama_metrics: data.llama_metrics };
+			allMessages = [...allMessages];
+		}
 		if (data.output) {
 			if (data.output.type === 'function_call') {
 				if (data.output.status === 'pending') stopTtsPlayback();
@@ -723,6 +733,7 @@
 		planMode = false;
 		requestParams = {};
 		voiceModeEnabled = false;
+		showReasoning = showReasoningTraces.get() ?? true;
 	}
 
 	function loadChatSettings(meta: Record<string, any> | null) {
@@ -741,6 +752,11 @@
 			requestParams = params.request_params;
 		}
 		voiceModeEnabled = params.voice_mode === true;
+		if (params.show_reasoning !== undefined) {
+			showReasoning = params.show_reasoning;
+		} else {
+			showReasoning = showReasoningTraces.get() ?? true;
+		}
 		const models = get(chatModels);
 		if (
 			typeof meta?.last_model === 'string' &&
@@ -755,7 +771,8 @@
 		await updateChatSettings(chatId, selectedModel, getChatSendParams()).catch(() => {});
 	}
 
-	onMount(() => {
+	onMount(async () => {
+		await showReasoningTraces.init();
 		resetChatSettings();
 
 		if (chatId) {
@@ -904,7 +921,8 @@
 		const params: ChatSendParams = {
 			tool_approval_mode: toolApprovalMode,
 			plan_mode: planMode,
-			request_params: requestParams
+			request_params: requestParams,
+			show_reasoning: showReasoning
 		};
 		if (voiceModeEnabled) params.voice_mode = true;
 		return params;
@@ -1808,6 +1826,7 @@
 					bind:planMode
 					bind:requestParams
 					bind:voiceModeEnabled
+					bind:showReasoning
 					{sending}
 					{workspace}
 					placeholder={$t('chat.placeholder', { name: workspaceDisplayName })}
@@ -1878,12 +1897,14 @@
 								done={msg.done}
 								output={msg.output}
 								usage={msg.usage}
+								llamaMetrics={msg.meta?.llama_metrics ?? null}
 								{chatId}
 								messageId={msg.id}
 								createdAt={msg.created_at}
 								{siblingIndex}
 								siblingTotal={siblingIds.length}
 								speaking={speakingMessageId === msg.id}
+								{showReasoning}
 								onnavigate={(dir) => handleNavigate(msg.id, dir)}
 								onfork={sending || streaming ? undefined : () => handleForkChat(msg.id)}
 								onregenerate={() => handleRegenerate(msg.id)}

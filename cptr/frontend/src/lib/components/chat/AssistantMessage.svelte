@@ -5,6 +5,7 @@
 	import OutputEditView from './OutputEditView.svelte';
 	import ChatFilePreview from './ChatFilePreview.svelte';
 	import ConsecutiveActivityGroup from './ConsecutiveActivityGroup.svelte';
+	import LlamaMetricsPanel from './LlamaMetricsPanel.svelte';
 	import MessageTimestamp from './MessageTimestamp.svelte';
 	import ReasoningCollapsible from './ReasoningCollapsible.svelte';
 	import ToolCallCollapsible from './ToolCallCollapsible.svelte';
@@ -21,12 +22,14 @@
 		done: boolean;
 		output: any[] | null;
 		usage: Record<string, number> | null;
+		llamaMetrics?: Record<string, number> | null;
 		chatId: string | null;
 		messageId: string;
 		createdAt?: number | null;
 		siblingIndex?: number;
 		siblingTotal?: number;
 		speaking?: boolean;
+		showReasoning?: boolean;
 		onapprove: (messageId: string, callId: string, approved: boolean) => void;
 		onnavigate?: (direction: -1 | 1) => void;
 		onfork?: () => void;
@@ -40,12 +43,14 @@
 		done,
 		output,
 		usage,
+		llamaMetrics = null,
 		chatId,
 		messageId,
 		createdAt = null,
 		siblingIndex = 0,
 		siblingTotal = 1,
 		speaking = false,
+		showReasoning = $bindable(true),
 		onapprove,
 		onnavigate,
 		onfork,
@@ -364,9 +369,11 @@
 					currentGroup!.calls.push(item);
 				}
 			} else if (item.type === 'reasoning') {
-				ensureGroup();
-				currentGroup!.entries.push(item);
-				currentGroup!.reasoning.push(item);
+				if (showReasoning) {
+					ensureGroup();
+					currentGroup!.entries.push(item);
+					currentGroup!.reasoning.push(item);
+				}
 			} else if (item.type === 'message') {
 				// Some providers emit empty message shells between reasoning/tool items.
 				// Only visible assistant text should break a consecutive activity run.
@@ -606,6 +613,9 @@
 				{/if}
 			{/if}
 		</div>
+
+		<!-- Live / final stream metrics (llama.cpp) -->
+		<LlamaMetricsPanel metrics={llamaMetrics} streaming={!done && !!llamaMetrics} />
 
 		<!-- Controls toolbar -->
 		{#if done || siblingTotal > 1}

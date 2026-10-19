@@ -31,6 +31,8 @@ from cptr.routers import (
 )
 from cptr.utils.config import check_access, load_config
 from cptr.utils.db import init_db
+from cptr.utils.workspace_watch import manager as watcher_manager
+from cptr.utils.chat_task import inject_queued_message
 
 START_TIME = time.time()
 
@@ -82,6 +84,14 @@ async def lifespan(app: FastAPI):
     app.state.bot_manager = BotManager(app)
     await app.state.bot_manager.start_all()
 
+    # Start directory watcher loop
+    watcher_manager.set_emit_callback(
+        lambda path, snapshot, is_trigger, meta: inject_queued_message(
+            path, snapshot, is_trigger, meta
+        )
+    )
+    app.state.watcher_task = asyncio.create_task(watcher_manager.run_loop())
+
     try:
         yield
     finally:
@@ -100,6 +110,7 @@ async def lifespan(app: FastAPI):
         bot_manager = getattr(app.state, "bot_manager", None)
         if bot_manager:
             await bot_manager.stop_all()
+
         try:
             from cptr.utils.async_subagents import cancel_all_async_subagents
 
@@ -119,6 +130,7 @@ async def lifespan(app: FastAPI):
             await shutdown_browser()
         except Exception:
             pass
+
         # Clean up stdio MCP server processes
         try:
             from cptr.utils.mcp.stdio_manager import stdio_manager
@@ -126,6 +138,15 @@ async def lifespan(app: FastAPI):
             await stdio_manager.disconnect_all()
         except Exception:
             pass
+
+        # Clean up directory watcher
+        watcher_task = getattr(app.state, "watcher_task", None)
+        if watcher_task:
+            watcher_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await watcher_task
+        from cptr.utils.workspace_watch import stop_all_directory_watches
+        await stop_all_directory_watches()
 
 
 app = FastAPI(lifespan=lifespan)

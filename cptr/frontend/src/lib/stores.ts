@@ -306,7 +306,7 @@ export const homeState = writable<HomeState>({
 });
 
 /** List of all workspace summaries for the sidebar. */
-export const workspaceList = writable<{ path: string; name: string; unread_count: number }[]>([]);
+export const workspaceList = writable<{ path: string; name: string; unread_count: number; pending_changes?: number }[]>([]);
 
 /** Global user preferences. */
 export const sidebarOpen = writable(
@@ -351,7 +351,7 @@ export const themeConfig = writable<ThemeConfig | null>(null);
 export const textScale = writable<number | null>(null);
 export const borderContrast = writable<number | null>(null);
 export const widescreenMode = writable(false);
-export const expandToolDetails = writable(false);
+export const expandToolDetails = writable(true);
 
 /** Saved workspace path order for sidebar drag-reorder. */
 export const workspaceOrder = writable<string[]>([]);

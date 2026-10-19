@@ -189,6 +189,17 @@ class Runtime:
         return await _file(await _request_identity(request), _delete_item, path)
 
     @staticmethod
+    async def touch_files(
+        request: Request, paths: list[str], mtime_iso: str
+    ) -> dict[str, Any]:
+        try:
+            dt = datetime.fromisoformat(mtime_iso)
+        except ValueError as exc:
+            raise FileError(f"Invalid mtime: {mtime_iso}", 400) from exc
+        ts = dt.timestamp()
+        return await _file(await _request_identity(request), _touch_files, paths, ts)
+
+    @staticmethod
     async def upload_file(
         request: Request, directory: str, filename: str, content: bytes
     ) -> dict[str, Any]:
@@ -411,6 +422,87 @@ def _human_size(size: int) -> str:
     return f"{size:.1f}TB"
 
 
+def _birth_time(path: str) -> float | None:
+    """Return the file birth/creation time as a POSIX timestamp, or None.
+
+    macOS exposes it natively via st_birthtime. Linux reads it from the statx
+    syscall (STATX_BTIME); filesystems that don't provide a birth time
+    (tmpfs, overlayfs, many container FS) return None rather than a misleading
+    ctime. Other platforms return None.
+    """
+    try:
+        if sys.platform == "darwin":
+            return float(os.stat(path).st_birthtime)
+    except (AttributeError, OSError):
+        pass
+
+    if sys.platform.startswith("linux"):
+        btime = _birth_time_linux(path)
+        if btime is not None:
+            return btime
+
+    return None
+
+
+def _birth_time_linux(path: str) -> float | None:
+    import ctypes
+
+    STATX_BTIME = 0x800
+
+    class StatxTimestamp(ctypes.Structure):
+        _fields_ = [
+            ("tv_sec", ctypes.c_int64),
+            ("tv_nsec", ctypes.c_uint32),
+            ("__reserved", ctypes.c_uint32),
+        ]
+
+    # Full kernel struct statx — must match the layout in linux/stat.h.
+    class Statx(ctypes.Structure):
+        _fields_ = [
+            ("stx_mask", ctypes.c_uint32),
+            ("stx_attributes", ctypes.c_uint32),
+            ("stx_ino", ctypes.c_uint32),
+            ("stx_dev", ctypes.c_uint32),
+            ("stx_nlink", ctypes.c_uint64),
+            ("stx_size", ctypes.c_uint64),
+            ("stx_blocks", ctypes.c_uint64),
+            ("stx_attributes_mask", ctypes.c_uint64),
+            ("stx_mode", ctypes.c_uint32),
+            ("stx_uid", ctypes.c_uint32),
+            ("stx_gid", ctypes.c_uint32),
+            ("stx_xattr_size", ctypes.c_uint32),
+            ("stx_atime", StatxTimestamp),
+            ("stx_btime", StatxTimestamp),
+            ("stx_ctime", StatxTimestamp),
+            ("stx_rdev_major", ctypes.c_uint64),
+            ("stx_rdev_minor", ctypes.c_uint64),
+            ("stx_dev_major", ctypes.c_uint64),
+            ("stx_dev_minor", ctypes.c_uint64),
+            ("stx_mnt_id", ctypes.c_uint32),
+            ("stx_generation", ctypes.c_uint32),
+            ("stx_lease_id", ctypes.c_uint64),
+            ("__statx_unused0", ctypes.c_uint32),
+            ("stx_crtimes", (ctypes.c_int64 * 3)),
+            ("__statx_padding", (ctypes.c_uint32 * 14)),
+        ]
+
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    statx = libc.statx
+    # statx(dirfd, filename, flags, mask, buf) — 5 args, no size param.
+    statx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_uint32, ctypes.c_void_p]
+    statx.restype = ctypes.c_int
+
+    buf = Statx()
+    ret = statx(0, os.fsencode(path), 0, STATX_BTIME, ctypes.byref(buf))
+    if ret != 0:
+        return None
+    if not (buf.stx_mask & STATX_BTIME):
+        return None
+    if buf.stx_btime.tv_sec == 0:
+        return None
+    return buf.stx_btime.tv_sec + buf.stx_btime.tv_nsec / 1e9
+
+
 def _is_text_file(path: Path) -> bool:
     if path.suffix.lower() in TEXT_EXTENSIONS:
         return True
@@ -450,16 +542,22 @@ def _list_directory(path: str) -> dict[str, Any]:
         try:
             st = item.stat()
             kind = "symlink" if item.is_symlink() else "directory" if item.is_dir() else "file"
+            btime = _birth_time(str(item))
             entries.append(
                 {
                     "name": item.name,
                     "type": kind,
                     "size": st.st_size if kind == "file" else None,
                     "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                    "created": (
+                        datetime.fromtimestamp(btime, tz=timezone.utc).isoformat()
+                        if btime is not None
+                        else None
+                    ),
                 }
             )
         except OSError:
-            entries.append({"name": item.name, "type": "file", "size": None, "modified": None})
+            entries.append({"name": item.name, "type": "file", "size": None, "modified": None, "created": None})
 
     order = {"directory": 0, "symlink": 1, "file": 2}
     entries.sort(key=lambda entry: (order.get(entry["type"], 2), entry["name"].lower()))
@@ -571,6 +669,17 @@ def _extract_text(path: str) -> dict[str, Any]:
         raise FileError(f"failed to extract text from {target}: {exc}") from exc
 
 
+def _mark_self_writes(*paths: Path) -> None:
+    """Mark exact cptr-initiated write paths so the workspace watcher ignores their events."""
+    try:
+        from cptr.utils.workspace_watch import mark_self_write
+
+        for p in paths:
+            mark_self_write(str(p))
+    except Exception:
+        pass
+
+
 def _write_file(path: str, content: str | bytes) -> dict[str, Any]:
     target = _path(path)
     if target.exists() and not target.is_file():
@@ -581,6 +690,7 @@ def _write_file(path: str, content: str | bytes) -> dict[str, Any]:
         target.write_bytes(content)
     else:
         target.write_text(content, encoding="utf-8")
+    _mark_self_writes(target)
     return {"status": "saved", "path": str(target), "size": target.stat().st_size}
 
 
@@ -611,6 +721,7 @@ def _create_item(path: str, type: str = "file") -> dict[str, Any]:
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.touch()
+    _mark_self_writes(target, target.parent)
     return {"status": "created", "path": str(target), "type": type}
 
 
@@ -624,6 +735,7 @@ def _move_item(source: str, destination: str) -> dict[str, Any]:
     if dst.exists():
         raise FileError(f"Destination exists: {dst}", 409)
     src.rename(dst)
+    _mark_self_writes(src, dst)
     return {"status": "moved", "source": str(src), "destination": str(dst)}
 
 
@@ -633,6 +745,18 @@ def _delete_item(path: str) -> dict[str, Any]:
         raise _missing(path)
     shutil.rmtree(target) if target.is_dir() else target.unlink()
     return {"status": "deleted", "path": str(target)}
+
+
+def _touch_files(paths: list[str], mtime: float) -> dict[str, Any]:
+    touched = []
+    for raw_path in paths:
+        target = _path(raw_path)
+        if not target.exists():
+            raise _missing(raw_path)
+        os.utime(str(target), (mtime, mtime))
+        touched.append(str(target))
+    _mark_self_writes(*[Path(p) for p in touched])
+    return {"status": "touched", "paths": touched}
 
 
 def _unique_child_path(directory: Path, filename: str) -> Path:
@@ -655,6 +779,7 @@ def _upload_file(directory: str, filename: str, content: bytes) -> dict[str, Any
         raise FileError(f"Not a directory: {directory}")
     target = _unique_child_path(target_dir, filename)
     target.write_bytes(content)
+    _mark_self_writes(target)
     return {"status": "uploaded", "path": str(target), "size": len(content)}
 
 
@@ -963,6 +1088,7 @@ CALLS = {
         _read_file,
         _search_files,
         _stat,
+        _touch_files,
         _upload_file,
         _write_file,
     )
